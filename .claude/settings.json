@@ -2,8 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(npm test*)",
       "Bash(docker-compose *)",
       "Bash(docker *)",
+      "Bash(podman *)",
       "Bash(npx drizzle-kit *)",
       "Bash(curl http://localhost:*)",
       "Bash(curl https://api.*)",
@@ -18,6 +21,18 @@
       "Bash(rm -rf /)",
       "Bash(sudo *)",
       "Bash(chmod 777 *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm test -- --reporter=verbose 2>&1 | tail -60"
+          }
+        ]
+      }
     ]
   }
 }
