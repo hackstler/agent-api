@@ -33,10 +33,9 @@ chat.post("/", async (c) => {
 
   // threadId / resourceId: Mastra 1.5 Memory API — accepted at runtime,
   // missing from the TS overloads when memory is present.
-  const result = await ragAgent.generate(
-    query,
-    { threadId: conversationId, resourceId: orgId ?? "anonymous" } as Parameters<typeof ragAgent.generate>[1]
-  );
+  const result = await ragAgent.generate(query, {
+    memory: { thread: conversationId, resource: orgId ?? "anonymous" },
+  });
 
   const sources = extractSources(result.steps ?? []);
 
@@ -100,10 +99,9 @@ chat.get("/stream", async (c) => {
     try {
       // threadId / resourceId: Mastra 1.5 Memory API — accepted at runtime,
       // missing from the TS overloads when memory is present.
-      const agentStream = await ragAgent.stream(
-        parsed.data.query,
-        { threadId: conversationId, resourceId: orgId ?? "anonymous" } as Parameters<typeof ragAgent.stream>[1]
-      );
+      const agentStream = await ragAgent.stream(parsed.data.query, {
+        memory: { thread: conversationId, resource: orgId ?? "anonymous" },
+      });
 
       for await (const chunk of agentStream.fullStream) {
         // Mastra 1.5 wraps all event data in payload
