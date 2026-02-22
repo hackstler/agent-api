@@ -10,7 +10,7 @@
 import "dotenv/config";
 import { db, ensurePgVector } from "./client.js";
 import { users, conversations, messages, documents, documentChunks } from "./schema.js";
-import { createEmbedding } from "../rag/pipeline.js";
+import { createEmbedding } from "../rag/embeddings.js";
 
 const SAMPLE_DOCUMENT_CONTENT = `
 # RAG Agent Backbone — Getting Started

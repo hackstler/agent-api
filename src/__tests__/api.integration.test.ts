@@ -4,7 +4,7 @@
  * These tests require:
  *   - Server running on http://localhost:3000
  *   - PostgreSQL accessible (DATABASE_URL)
- *   - Ollama running for embedding/chat tests (optional — LLM tests are skipped if unavailable)
+ *   - GOOGLE_API_KEY set for embedding/chat tests
  *
  * Run: npm test
  * Against a live server: BASE_URL=http://your-host:3000 npm test
@@ -35,18 +35,14 @@ async function del(path: string) {
   return fetch(`${BASE_URL}${path}`, { method: "DELETE" });
 }
 
-// Check service availability before running dependent tests
 let serverAvailable = false;
-let ollamaAvailable = false;
 
 beforeAll(async () => {
   try {
     const res = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       serverAvailable = true;
-      const data = (await res.json()) as { services: { ollama: string } };
-      ollamaAvailable = data.services?.ollama === "ok";
-      console.log(`[test setup] server=ok, ollama=${ollamaAvailable ? "ok" : "unavailable"}`);
+      console.log("[test setup] server=ok");
     }
   } catch {
     console.log("[test setup] server not reachable — tests will be skipped");
@@ -56,8 +52,6 @@ beforeAll(async () => {
 afterAll(() => {
   if (!serverAvailable) {
     console.warn("⚠️  All tests skipped — server not running at", BASE_URL);
-  } else if (!ollamaAvailable) {
-    console.warn("⚠️  Ollama tests skipped — Ollama not running");
   }
 });
 
@@ -74,7 +68,7 @@ describe("GET /health", () => {
 
     const body = (await res.json()) as {
       status: string;
-      services: { database: string; ollama: string };
+      services: { database: string };
       version: string;
       timestamp: string;
     };
@@ -144,7 +138,6 @@ describe("Conversations API", () => {
     expect(body.deleted).toBe(true);
     expect(body.id).toBe(createdId);
 
-    // Verify it's gone
     const check = await get(`/conversations/${createdId}`);
     expect(check.status).toBe(404);
   });
@@ -158,7 +151,7 @@ describe("Ingest API", () => {
   let documentId: string;
 
   it("POST /ingest — ingests a text file and creates embeddings", async () => {
-    if (!serverAvailable || !ollamaAvailable) return;
+    if (!serverAvailable) return;
 
     const content = "RAG systems combine retrieval and generation for accurate answers.";
     const file = new File([content], "test.txt", { type: "text/plain" });
@@ -181,7 +174,7 @@ describe("Ingest API", () => {
   });
 
   it("GET /ingest/status/:id — returns document status", async () => {
-    if (!serverAvailable || !ollamaAvailable || !documentId) return;
+    if (!serverAvailable || !documentId) return;
 
     const res = await get(`/ingest/status/${documentId}`);
     expect(res.status).toBe(200);
@@ -228,7 +221,7 @@ describe("Chat API", () => {
   });
 
   it("POST /chat — returns answer with sources and metadata", async () => {
-    if (!serverAvailable || !ollamaAvailable) return;
+    if (!serverAvailable) return;
 
     const res = await post("/chat", { query: "What is RAG?" });
     expect(res.status).toBe(200);
@@ -245,30 +238,25 @@ describe("Chat API", () => {
     expect(Array.isArray(body.sources)).toBe(true);
     expect(body.metadata.model).toBeDefined();
     expect(body.metadata.latencyMs).toBeGreaterThan(0);
-  }, 30_000); // 30s timeout for LLM response
+  }, 30_000);
 
   it("POST /chat — reuses existing conversation", async () => {
-    if (!serverAvailable || !ollamaAvailable) return;
+    if (!serverAvailable) return;
 
-    // Create a conversation first
     const convRes = await post("/conversations", { title: "Chat test" });
     const { id: conversationId } = (await convRes.json()) as { id: string };
 
-    const res = await post("/chat", {
-      query: "What is RAG?",
-      conversationId,
-    });
+    const res = await post("/chat", { query: "What is RAG?", conversationId });
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as { conversationId: string };
     expect(body.conversationId).toBe(conversationId);
 
-    // Clean up
     await del(`/conversations/${conversationId}`);
   }, 30_000);
 
   it("GET /chat/stream — returns SSE stream with correct event format", async () => {
-    if (!serverAvailable || !ollamaAvailable) return;
+    if (!serverAvailable) return;
 
     const res = await get("/chat/stream?query=What+is+RAG%3F");
     expect(res.headers.get("content-type")).toContain("text/event-stream");

@@ -99,8 +99,8 @@ export const documents = pgTable("documents", {
   indexedAt: timestamp("indexed_at", { withTimezone: true }),
 });
 
-// Embedding dimension: 1536 for OpenAI text-embedding-3-small (prod)
-// 768 for Ollama nomic-embed-text (local) — set EMBEDDING_DIM env var accordingly
+// Embedding dimension: 768 for Gemini gemini-embedding-001 (default)
+// 1536 for OpenAI text-embedding-3-small — set EMBEDDING_DIM env var to override
 const EMBEDDING_DIM = Number(process.env["EMBEDDING_DIM"] ?? 768);
 
 export const documentChunks = pgTable(

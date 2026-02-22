@@ -2,10 +2,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import { ragConfig } from "../config/rag.config.js";
 
-export function resolveProvider(): "gemini" | "anthropic" | "ollama" {
+export function resolveProvider(): "gemini" | "openai" {
   if (process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) return "gemini";
-  if (process.env["NODE_ENV"] === "production") return "anthropic";
-  return "ollama";
+  return "openai";
 }
 
 function getGoogleClient(): GoogleGenerativeAI {
@@ -16,14 +15,13 @@ function getGoogleClient(): GoogleGenerativeAI {
 
 function getOpenAIClient(): OpenAI {
   const apiKey = process.env["OPENAI_API_KEY"];
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required in production");
+  if (!apiKey) throw new Error("OPENAI_API_KEY is required");
   return new OpenAI({ apiKey });
 }
 
 export async function createEmbedding(text: string): Promise<number[]> {
   const provider = resolveProvider();
   if (provider === "gemini") return createGeminiEmbedding(text);
-  if (provider === "ollama") return createOllamaEmbedding(text);
 
   const openai = getOpenAIClient();
   const response = await openai.embeddings.create({
@@ -42,17 +40,4 @@ async function createGeminiEmbedding(text: string): Promise<number[]> {
     outputDimensionality: 768,
   } as Parameters<typeof model.embedContent>[0]);
   return result.embedding.values;
-}
-
-async function createOllamaEmbedding(text: string): Promise<number[]> {
-  const baseUrl = process.env["OLLAMA_BASE_URL"] ?? "http://localhost:11434";
-  const model = process.env["OLLAMA_EMBED_MODEL"] ?? "nomic-embed-text";
-  const response = await fetch(`${baseUrl}/api/embeddings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, prompt: text }),
-  });
-  if (!response.ok) throw new Error(`Ollama embedding failed: ${response.statusText}`);
-  const data = (await response.json()) as { embedding: number[] };
-  return data.embedding;
 }

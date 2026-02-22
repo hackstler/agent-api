@@ -75,14 +75,10 @@ const defaultConfig: RagConfig = {
 
   enableStreaming: true,
 
-  // Model selection: prod uses OpenAI/Anthropic, local uses Ollama
-  llmModel: process.env["NODE_ENV"] === "production"
-    ? "claude-3-5-sonnet-20241022"
-    : (process.env["OLLAMA_LLM_MODEL"] ?? "mistral"),
-  embeddingModel: process.env["NODE_ENV"] === "production"
-    ? "text-embedding-3-small"
-    : (process.env["OLLAMA_EMBED_MODEL"] ?? "nomic-embed-text"),
-  embeddingDimensions: process.env["NODE_ENV"] === "production" ? 1536 : 768,
+  // Gemini in dev, OpenAI/Anthropic in prod
+  llmModel: process.env["GEMINI_MODEL"] ?? "gemini-2.5-flash",
+  embeddingModel: "gemini-embedding-001",
+  embeddingDimensions: 768,
 
   enableTracing: Boolean(process.env["LANGFUSE_SECRET_KEY"] || process.env["LANGSMITH_API_KEY"]),
   tracingProvider: process.env["LANGFUSE_SECRET_KEY"]
