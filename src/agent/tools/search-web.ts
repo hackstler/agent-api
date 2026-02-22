@@ -1,10 +1,17 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import type { ToolEntry } from "./base.js";
 
 /**
- * Web search fallback via Tavily.
+ * Web search fallback via Perplexity (sonar model).
  * No RAG deps needed — use as-is when knowledge base has no results.
+ * Requires PERPLEXITY_API_KEY.
  */
+export const searchWebEntry: ToolEntry = {
+  key: "searchWeb",
+  create: (_deps) => createSearchWebTool(),
+};
+
 export function createSearchWebTool() {
   return createTool({
     id: "search-web",
@@ -26,20 +33,21 @@ Always tell the user when the answer comes from a web search, not from their doc
       available: z.boolean(),
     }),
     execute: async ({ query }) => {
-      const tavilyKey = process.env["TAVILY_API_KEY"];
+      const apiKey = process.env["PERPLEXITY_API_KEY"];
 
-      if (!tavilyKey) {
+      if (!apiKey) {
         return { results: [], source: "web" as const, available: false };
       }
 
-      const response = await fetch("https://api.tavily.com/search", {
+      const response = await fetch("https://api.perplexity.ai/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          api_key: tavilyKey,
-          query,
-          max_results: 3,
-          search_depth: "basic",
+          model: "sonar",
+          messages: [{ role: "user", content: query }],
         }),
       });
 
@@ -48,18 +56,26 @@ Always tell the user when the answer comes from a web search, not from their doc
       }
 
       const data = (await response.json()) as {
-        results: Array<{ title: string; content: string; url: string }>;
+        choices: Array<{ message: { content: string } }>;
+        citations?: string[];
       };
 
-      return {
-        results: data.results.map((r) => ({
-          title: r.title,
-          snippet: r.content.slice(0, 400),
-          url: r.url,
-        })),
-        source: "web" as const,
-        available: true,
-      };
+      const answer = data.choices[0]?.message.content ?? "";
+      const citations = data.citations ?? [];
+
+      // First result carries the synthesized answer, rest are citation references
+      const results = citations.slice(0, 5).map((url, i) => ({
+        title: (() => { try { return new URL(url).hostname; } catch { return url; } })(),
+        snippet: i === 0 ? answer.slice(0, 500) : url,
+        url,
+      }));
+
+      // If no citations, return the answer as a single result
+      if (results.length === 0 && answer) {
+        results.push({ title: "Web search", snippet: answer.slice(0, 500), url: "" });
+      }
+
+      return { results, source: "web" as const, available: true };
     },
   });
 }

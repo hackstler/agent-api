@@ -1,22 +1,38 @@
-import { createSearchDocumentsTool } from "./search-documents.js";
-import { createSearchWebTool } from "./search-web.js";
-import type { ToolRegistryDeps } from "./base.js";
+import { toolsConfig } from "../../config/tools.config.js";
+import { searchDocumentsEntry } from "./search-documents.js";
+import { searchWebEntry } from "./search-web.js";
+import type { ToolEntry, ToolRegistryDeps } from "./base.js";
 
 export type { ToolRegistryDeps };
 
 /**
- * Central tool registry.
- *
- * To add a tool:
- * 1. Create `src/agent/tools/my-tool.ts` with `createMyTool(deps?)`
- * 2. Add one line here: `myTool: createMyTool(deps)`
- *
- * The registry object keys become the tool names the agent uses.
+ * All available tools. To add a new tool:
+ * 1. Create src/agent/tools/my-tool.ts  (export myToolEntry: ToolEntry)
+ * 2. Import and add it here              ← one line
+ * 3. Enable it in src/config/tools.config.ts ← one line
+ */
+const ALL_TOOLS: ToolEntry[] = [
+  searchDocumentsEntry,
+  searchWebEntry,
+];
+
+/**
+ * Builds the tool object for the Mastra agent.
+ * Only includes tools enabled in tools.config.ts.
  */
 export function createToolRegistry(deps: ToolRegistryDeps) {
-  return {
-    searchDocuments: createSearchDocumentsTool(deps),
-    searchWeb: createSearchWebTool(),
-    // Add new tools here ↓
-  };
+  const enabled = new Set(
+    Object.entries(toolsConfig)
+      .filter(([, cfg]) => cfg.enabled)
+      .map(([key]) => key)
+  );
+
+  const activeTools = ALL_TOOLS.filter((t) => enabled.has(t.key));
+
+  console.log(
+    "[tools] active:",
+    activeTools.map((t) => t.key).join(", ") || "none"
+  );
+
+  return Object.fromEntries(activeTools.map((t) => [t.key, t.create(deps)]));
 }

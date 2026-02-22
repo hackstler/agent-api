@@ -12,85 +12,110 @@ Examples:
 ## What this skill does
 
 1. Reads `src/agent/tools/search-documents.ts` as the reference pattern
-2. Reads `src/agent/tools/base.ts` for the ToolRegistryDeps interface
-3. Reads `src/agent/tools/index.ts` to see the current registry
-4. Generates `src/agent/tools/<tool-name>.ts` with:
-   - JSDoc comment explaining the tool's purpose
-   - `inputSchema` with typed Zod fields
+2. Reads `src/agent/tools/base.ts` for `ToolEntry` and `ToolRegistryDeps`
+3. Reads `src/agent/tools/index.ts` to ver `ALL_TOOLS`
+4. Reads `src/config/tools.config.ts` para ver las tools activas
+5. Genera `src/agent/tools/<tool-name>.ts` con:
+   - `create<PascalCase>Tool(deps)` — factory function
+   - `<camelCase>Entry: ToolEntry` — self-registering entry
+   - `inputSchema` con Zod + `.describe()` en cada campo
    - `outputSchema`
-   - `execute` with the requested logic
-   - `deps: ToolRegistryDeps` parameter ONLY if the tool needs embedder/retriever/reranker
-5. Adds one line in `createToolRegistry()` in `tools/index.ts`
-6. Runs `npx tsc --noEmit` to verify no type errors
-7. Shows the diff
+   - `execute` con la lógica
+   - `deps: ToolRegistryDeps` solo si la tool necesita embedder/retriever/reranker
+6. Añade la entrada en `ALL_TOOLS` en `tools/index.ts` (un import + una línea)
+7. Añade la key en `src/config/tools.config.ts` (una línea)
+8. Ejecuta `npx tsc --noEmit` para verificar tipos
+9. Muestra el diff al usuario
 
 ## Instructions for Claude
 
 When this skill is invoked:
 
-1. Parse the tool name (kebab-case) and description from the arguments.
-   - Tool name becomes the filename: `<tool-name>.ts`
-   - The exported function name: `create<PascalCase>Tool`
-   - The registry key: `<camelCase>` (matches the function name without "create" and "Tool")
+### Step 1 — Parse arguments
+- Tool name: kebab-case → filename `<tool-name>.ts`
+- Factory function: `create<PascalCase>Tool`
+- Entry export: `<camelCase>Entry`
+- Registry key: `<camelCase>`
 
-2. Read these files before generating:
-   - `src/agent/tools/search-documents.ts` — pattern reference
-   - `src/agent/tools/base.ts` — ToolRegistryDeps definition
-   - `src/agent/tools/index.ts` — current registry
+### Step 2 — Read these files first
+- `src/agent/tools/search-documents.ts` — reference pattern
+- `src/agent/tools/base.ts` — ToolEntry + ToolRegistryDeps
+- `src/agent/tools/index.ts` — ALL_TOOLS array
+- `src/config/tools.config.ts` — active tools config
 
-3. Decide if the tool needs RAG deps (embedder/retriever/reranker):
-   - YES if the tool searches or processes documents from the knowledge base
-   - NO if it's a utility, external API call, or doesn't touch the vector DB
+### Step 3 — Decide deps
+- Needs `ToolRegistryDeps` if the tool searches documents (embedder/retriever/reranker)
+- Does NOT need deps if it's an external API, utility, or doesn't touch pgvector
 
-4. Generate `src/agent/tools/<tool-name>.ts` following this template:
+### Step 4 — Generate `src/agent/tools/<tool-name>.ts`
 
 ```typescript
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-// import { ragConfig } from "../../config/rag.config.js";  // if needed
-// import type { ToolRegistryDeps } from "./base.js";       // if needs RAG deps
+import type { ToolEntry, ToolRegistryDeps } from "./base.js";
+// import { ragConfig } from "../../config/rag.config.js"; // if needed
 
 /**
- * <Description of what this tool does and when the agent should use it>
+ * <Description: what it does and when the agent should call it>
  */
-export function create<PascalCase>Tool(/* deps?: ToolRegistryDeps */) {
+export const <camelCase>Entry: ToolEntry = {
+  key: "<camelCase>",
+  create: (deps) => create<PascalCase>Tool(deps), // or (_deps) if no RAG deps
+};
+
+export function create<PascalCase>Tool(deps: ToolRegistryDeps) {
   return createTool({
     id: "<tool-name>",
-    description: `<Clear description for the agent.
-Include WHEN to call this tool and what it returns.>`,
+    description: `<Clear description.
+WHEN to call it. WHAT it returns.>`,
     inputSchema: z.object({
-      // typed fields with .describe() for each
+      // every field must have .describe()
     }),
     outputSchema: z.object({
       // typed return shape
     }),
-    execute: async ({ /* destructured input */ }) => {
-      // implementation
+    execute: async ({ /* input fields */ }) => {
+      // implementation using deps.embedder / deps.retriever / deps.reranker if needed
     },
   });
 }
 ```
 
-5. Add one line to `createToolRegistry()` in `tools/index.ts`:
+### Step 5 — Update `src/agent/tools/index.ts`
+
+Add import and entry to `ALL_TOOLS`:
 
 ```typescript
-import { create<PascalCase>Tool } from "./<tool-name>.js";
-// ...
-export function createToolRegistry(deps: ToolRegistryDeps) {
-  return {
-    searchDocuments: createSearchDocumentsTool(deps),
-    searchWeb: createSearchWebTool(),
-    <camelCase>: create<PascalCase>Tool(/* deps if needed */),
-  };
-}
+import { <camelCase>Entry } from "./<tool-name>.js"; // ← add import
+
+const ALL_TOOLS: ToolEntry[] = [
+  searchDocumentsEntry,
+  searchWebEntry,
+  <camelCase>Entry,  // ← add here
+];
 ```
 
-6. Run `npx tsc --noEmit` from the worktree root to check types.
+### Step 6 — Update `src/config/tools.config.ts`
 
-7. Show the user the created file and the diff to `tools/index.ts`.
+```typescript
+export const toolsConfig = {
+  searchDocuments: { enabled: true, description: "..." },
+  searchWeb:       { enabled: ...,  description: "..." },
+  <camelCase>:     { enabled: true, description: "<one-line description>" }, // ← add
+} satisfies Record<string, { enabled: boolean; description: string }>;
+```
+
+### Step 7 — Validate
+```bash
+npx tsc --noEmit
+```
+
+### Step 8 — Show diff
+Show the user the new file + changes to `index.ts` and `tools.config.ts`.
 
 ## Rules
-- Never touch existing tool files (Open/Closed principle)
+- Never modify existing tool files (Open/Closed principle)
 - Use `z.string().describe("...")` on every input field
-- Always export the factory function, never the tool instance directly
-- Follow the naming convention: filename kebab-case, function PascalCase, registry key camelCase
+- Always export both the `Entry` (for registry) and the `create*Tool` factory (for direct use)
+- Naming: filename kebab-case, factory PascalCase, entry/key camelCase
+- If the tool auto-enables based on an env var, use `enabled: Boolean(process.env["MY_KEY"])` in tools.config.ts

@@ -92,7 +92,7 @@ chat.get("/stream", async (c) => {
   return stream(c, async (streamWriter) => {
     let fullAnswer = "";
     let sourcesEmitted = false;
-    const collectedSources: Array<{ id: string; title: string; score: number }> = [];
+    const collectedSources: Array<{ id: string; documentTitle: string; documentSource: string; score: number; excerpt: string }> = [];
 
     try {
       const agentStream = await ragAgent.stream(parsed.data.query, {
@@ -108,11 +108,17 @@ chat.get("/stream", async (c) => {
           const toolName = payload["toolName"] as string | undefined;
           if (toolName === "searchDocuments" && !sourcesEmitted) {
             const res = payload["result"] as {
-              chunks?: Array<{ id: string; documentTitle: string; score: number }>;
+              chunks?: Array<{ id: string; content: string; documentTitle: string; documentSource: string; score: number }>;
             } | undefined;
             const chunks = res?.chunks ?? [];
             collectedSources.push(
-              ...chunks.map((ch) => ({ id: ch.id, title: ch.documentTitle, score: ch.score }))
+              ...chunks.map((ch) => ({
+                id: ch.id,
+                documentTitle: ch.documentTitle,
+                documentSource: ch.documentSource ?? "",
+                score: ch.score,
+                excerpt: ch.content?.slice(0, 200) + (ch.content?.length > 200 ? "…" : ""),
+              }))
             );
             await streamWriter.write(
               `data: ${JSON.stringify({ type: "sources", chunks: collectedSources })}\n\n`

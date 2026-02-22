@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { ragConfig } from "../../config/rag.config.js";
-import type { ToolRegistryDeps } from "./base.js";
+import type { ToolEntry, ToolRegistryDeps } from "./base.js";
 
 const chunkSchema = z.object({
   id: z.string(),
@@ -15,6 +15,11 @@ const chunkSchema = z.object({
  * Search the knowledge base using semantic similarity.
  * Deps are injected — swap embedder/retriever/reranker without touching this file.
  */
+export const searchDocumentsEntry: ToolEntry = {
+  key: "searchDocuments",
+  create: (deps) => createSearchDocumentsTool(deps),
+};
+
 export function createSearchDocumentsTool({ embedder, retriever, reranker }: ToolRegistryDeps) {
   return createTool({
     id: "search-documents",
