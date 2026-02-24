@@ -58,13 +58,13 @@ const defaultConfig: RagConfig = {
   responseLanguage: "es",
   useCase: "custom",
 
-  topK: Number(process.env["RAG_TOP_K"] ?? 5),
-  similarityThreshold: Number(process.env["RAG_SIMILARITY_THRESHOLD"] ?? 0.7),
+  topK: Number(process.env["RAG_TOP_K"] ?? 10),
+  similarityThreshold: Number(process.env["RAG_SIMILARITY_THRESHOLD"] ?? 0.3),
   chunkSize: Number(process.env["RAG_CHUNK_SIZE"] ?? 512),
   chunkOverlap: Number(process.env["RAG_CHUNK_OVERLAP"] ?? 50),
   chunkingStrategy: "fixed",
 
-  queryEnhancement: "none",
+  queryEnhancement: (process.env["RAG_QUERY_ENHANCEMENT"] as QueryEnhancement) || "multi-query",
   multiQueryCount: 3,
 
   enableReranking: false,
