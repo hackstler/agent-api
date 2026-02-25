@@ -148,20 +148,54 @@ function formatDuration(iso: string): string {
 
 // ─── youtube-transcript — transcript text ─────────────────────────────────────
 
-async function fetchTranscript(videoId: string): Promise<string | null> {
+interface TranscriptSegment { text: string; offset: number; duration: number; }
+
+async function fetchTranscript(videoId: string): Promise<TranscriptSegment[] | null> {
   console.log(`  [youtube:transcript] Attempting to fetch transcript for ${videoId}`);
   try {
     const { YoutubeTranscript } = await import("youtube-transcript");
-    const items = await YoutubeTranscript.fetchTranscript(videoId);
-    const text = items.map((t) => t.text).join(" ").replace(/\s+/g, " ").trim();
-    console.log(`  [youtube:transcript] OK — ${items.length} segments, ${text.length} chars`);
-    return text;
+    const items = await YoutubeTranscript.fetchTranscript(videoId) as TranscriptSegment[];
+    console.log(`  [youtube:transcript] OK — ${items.length} segments`);
+    return items;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Known non-fatal cases: disabled captions, no subtitles, rate limited
     console.warn(`  [youtube:transcript] NONE — ${message}`);
     return null;
   }
+}
+
+/**
+ * Group transcript segments into ~N-minute sections with [MM:SS] timestamps.
+ * Produces readable chunks that reference where in the video the content is.
+ */
+function groupTranscriptBySections(segments: TranscriptSegment[], sectionSeconds = 120): string {
+  if (segments.length === 0) return "";
+
+  const lines: string[] = [];
+  let currentLines: string[] = [];
+  let sectionStart = 0;
+
+  for (const seg of segments) {
+    const offsetSec = Math.floor((seg.offset ?? 0) / 1000);
+
+    if (offsetSec - sectionStart >= sectionSeconds && currentLines.length > 0) {
+      const mm = String(Math.floor(sectionStart / 60)).padStart(2, "0");
+      const ss = String(sectionStart % 60).padStart(2, "0");
+      lines.push(`[${mm}:${ss}] ${currentLines.join(" ").replace(/\s+/g, " ").trim()}`);
+      currentLines = [];
+      sectionStart = offsetSec;
+    }
+
+    currentLines.push(seg.text.trim());
+  }
+
+  if (currentLines.length > 0) {
+    const mm = String(Math.floor(sectionStart / 60)).padStart(2, "0");
+    const ss = String(sectionStart % 60).padStart(2, "0");
+    lines.push(`[${mm}:${ss}] ${currentLines.join(" ").replace(/\s+/g, " ").trim()}`);
+  }
+
+  return lines.join("\n\n");
 }
 
 // ─── Vision AI — Gemini thumbnail analysis ────────────────────────────────────
@@ -261,7 +295,7 @@ export async function loadYoutubeVideo(url: string, options?: LoadOptions): Prom
   console.log(`\n[youtube] Loading ${canonicalUrl}`);
   console.log(`  [youtube] youtubeApiKey=${youtubeApiKey ? "SET" : "NOT SET"} googleApiKey=${googleApiKey ? "SET" : "NOT SET"}`);
 
-  const [video, rawTranscript] = await Promise.all([
+  const [video, transcriptSegments] = await Promise.all([
     fetchVideoMetadata(videoId, youtubeApiKey),
     fetchTranscript(videoId),
   ]);
@@ -272,39 +306,57 @@ export async function loadYoutubeVideo(url: string, options?: LoadOptions): Prom
   const thumbnail =
     snippet.thumbnails.high?.url ?? snippet.thumbnails.default?.url ?? "";
 
-  // Vision AI fallback: if no transcript, try to describe the thumbnail
-  let transcriptText: string | null = rawTranscript;
+  console.log(`  [youtube] transcript=${transcriptSegments ? `${transcriptSegments.length} segments` : "NONE"} thumbnail=${thumbnail || "MISSING"}`);
+
+  // Content section 3: transcript (with timestamps) OR Vision AI analysis
+  let contentSection: string | null = null;
   let isVisualAnalysis = false;
 
-  console.log(`  [youtube] transcript=${rawTranscript ? `${rawTranscript.length} chars` : "NONE"} thumbnail=${thumbnail || "MISSING"}`);
-
-  if (!transcriptText && thumbnail && googleApiKey) {
+  if (transcriptSegments && transcriptSegments.length > 0) {
+    console.log(`  [youtube] Transcript available — building timestamped sections`);
+    contentSection = groupTranscriptBySections(transcriptSegments, 120); // 2-min sections
+  } else if (thumbnail && googleApiKey) {
     console.log(`  [youtube] No transcript → attempting Vision AI`);
-    transcriptText = await generateVisualDescription(videoId, snippet.title, thumbnail, googleApiKey, options?.visionPrompt);
-    if (transcriptText) isVisualAnalysis = true;
-  } else if (rawTranscript) {
-    console.log(`  [youtube] Transcript available — skipping Vision AI`);
+    contentSection = await generateVisualDescription(videoId, snippet.title, thumbnail, googleApiKey, options?.visionPrompt);
+    if (contentSection) isVisualAnalysis = true;
   } else if (!thumbnail) {
-    console.warn(`  [youtube] No transcript AND no thumbnail — no visual content`);
+    console.warn(`  [youtube] No transcript AND no thumbnail — storing metadata only`);
   } else if (!googleApiKey) {
     console.warn(`  [youtube] No transcript AND no GOOGLE_API_KEY — skipping Vision AI`);
   }
 
-  // Build the document content — this is what gets embedded
-  const sections: string[] = [
-    snippet.title,
-    `Canal: ${snippet.channelTitle}`,
-    `Duración: ${duration}`,
-    ...(tags.length ? [`Tags: ${tags.join(", ")}`] : []),
-    "",
-    snippet.description,
-  ];
+  // ── Structured content with ## headers so hierarchical chunker splits naturally ──
+  //
+  // Chunk 1 (Introduction): title + metadata — always present
+  // Chunk 2 (Descripción): video description — if non-empty
+  // Chunk 3+ (Transcripción / Análisis Visual): content — split by section size
+  //
+  const parts: string[] = [];
 
-  if (transcriptText) {
-    sections.push("", isVisualAnalysis ? "Análisis visual:" : "Transcripción:", transcriptText);
+  // Section 1: Metadata
+  const metaLines = [
+    `# ${snippet.title}`,
+    `**Canal:** ${snippet.channelTitle} | **Duración:** ${duration}`,
+    ...(tags.length ? [`**Tags:** ${tags.join(", ")}`] : []),
+    ...(thumbnail ? [`**Thumbnail:** ${thumbnail}`] : []),
+  ];
+  parts.push(metaLines.join("\n"));
+
+  // Section 2: Description (only if meaningful)
+  const desc = snippet.description?.trim();
+  if (desc && desc.length > 20) {
+    parts.push(`## Descripción\n${desc}`);
   }
 
-  const content = sections.join("\n");
+  // Section 3+: Transcript or Vision AI
+  if (contentSection) {
+    const sectionTitle = isVisualAnalysis ? "## Análisis Visual" : "## Transcripción";
+    parts.push(`${sectionTitle}\n${contentSection}`);
+  }
+
+  const content = parts.join("\n\n");
+
+  console.log(`  [youtube] Content built: ${parts.length} sections, ${content.length} chars, isVisualAnalysis=${isVisualAnalysis}`);
 
   return {
     content,
@@ -313,7 +365,6 @@ export async function loadYoutubeVideo(url: string, options?: LoadOptions): Prom
       source: canonicalUrl,
       contentType: "youtube",
       size: Buffer.byteLength(content, "utf-8"),
-      // Extra fields stored in DB document.metadata (jsonb)
       ...({
         youtubeId: videoId,
         channel: snippet.channelTitle,
@@ -321,7 +372,7 @@ export async function loadYoutubeVideo(url: string, options?: LoadOptions): Prom
         durationSeconds: parseDurationSeconds(contentDetails.duration),
         tags,
         thumbnailUrl: thumbnail,
-        hasTranscript: transcriptText !== null && !isVisualAnalysis,
+        hasTranscript: transcriptSegments !== null && !isVisualAnalysis,
         hasVisualAnalysis: isVisualAnalysis,
         publishedAt: snippet.publishedAt,
       } as object),
