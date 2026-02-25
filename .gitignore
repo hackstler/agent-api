@@ -39,3 +39,4 @@ frontend/
 *.log
 logs/
 specs
+docs/
