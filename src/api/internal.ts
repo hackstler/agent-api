@@ -4,6 +4,7 @@ import { db } from "../db/client.js";
 import { whatsappSessions, conversations } from "../db/schema.js";
 import { ragAgent } from "../agent/index.js";
 import { ragConfig } from "../config/rag.config.js";
+import { extractSources } from "./helpers/extract-sources.js";
 import { persistMessages } from "./helpers/persist-messages.js";
 
 const internal = new Hono();
@@ -105,11 +106,23 @@ internal.post("/whatsapp/message", async (c) => {
       memory: { thread: conversationId, resource: orgId },
     });
 
+    const sources = extractSources(result.steps ?? []);
+
     await persistMessages(conversationId, messageBody, result.text, {
       model: ragConfig.llmModel,
+      retrievedChunks: sources.map((s) => s.id),
     });
 
-    return c.json({ data: { reply: result.text } });
+    // Append source links to the reply for WhatsApp
+    let reply = result.text;
+    const sourceLinks = sources
+      .filter((s) => s.documentSource)
+      .map((s) => `• ${s.documentTitle}: ${s.documentSource}`);
+    if (sourceLinks.length > 0) {
+      reply += `\n\n📎 *Sources:*\n${sourceLinks.join("\n")}`;
+    }
+
+    return c.json({ data: { reply } });
   } catch (error) {
     console.error("[internal/message] RAG agent error:", error);
     return c.json({ error: "RAG agent unavailable" }, 503);
