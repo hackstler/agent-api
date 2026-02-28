@@ -14,13 +14,13 @@ export interface TokenPayload extends JwtPayload {
 
 export interface WorkerTokenPayload extends JwtPayload {
   role: "worker";
-  orgId: string;
+  orgId?: string;
 }
 
 declare module "hono" {
   interface ContextVariableMap {
     user: TokenPayload;
-    workerOrgId: string;
+    workerOrgId: string | undefined;
   }
 }
 
@@ -155,11 +155,10 @@ export function requireWorker(): MiddlewareHandler {
       }
 
       const orgId = payload["orgId"];
-      if (typeof orgId !== "string" || !orgId) {
-        return c.json({ error: "Forbidden", message: "Missing orgId in worker token" }, 403);
+      // orgId is optional — system workers (multi-org) don't have it in the JWT
+      if (typeof orgId === "string" && orgId) {
+        c.set("workerOrgId", orgId);
       }
-
-      c.set("workerOrgId", orgId);
       await next();
     } catch {
       return c.json({ error: "Unauthorized", message: "Invalid or expired token" }, 401);
