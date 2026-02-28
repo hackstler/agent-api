@@ -15,7 +15,6 @@ const ingest = new Hono();
 
 const ingestUrlSchema = z.object({
   url: z.string().url(),
-  orgId: z.string().optional(),
   title: z.string().optional(),
   topicId: z.string().uuid().optional(),
 });
@@ -47,7 +46,8 @@ ingest.post("/", async (c) => {
 async function handleFileUpload(c: Context) {
   const body = await c.req.parseBody();
   const file = body["file"];
-  const orgId = typeof body["orgId"] === "string" ? body["orgId"] : undefined;
+  const user = c.get("user");
+  const orgId = user?.orgId;
 
   if (!(file instanceof File)) {
     return c.json({ error: "Missing 'file' field in form data" }, 400);
@@ -92,7 +92,9 @@ async function handleUrlIngest(c: Context) {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const { url, orgId, title, topicId } = parsed.data;
+  const { url, title, topicId } = parsed.data;
+  const user = c.get("user");
+  const orgId = user?.orgId;
   const loaded = await loadDocument(url);
 
   if (title) {
