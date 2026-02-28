@@ -14,7 +14,6 @@ const chat = new Hono();
 const chatSchema = z.object({
   query: z.string().min(1).max(10_000),
   conversationId: z.string().uuid().optional(),
-  orgId: z.string().optional(),
   documentIds: z.array(z.string().uuid()).optional(),
 });
 
@@ -30,7 +29,8 @@ chat.post("/", async (c) => {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const { query, orgId } = parsed.data;
+  const { query } = parsed.data;
+  const orgId = c.get("user")?.orgId;
   const conversationId = await resolveConversationId(parsed.data.conversationId);
 
   // threadId / resourceId: Mastra 1.5 Memory API — accepted at runtime,
@@ -70,7 +70,7 @@ chat.post("/", async (c) => {
 chat.get("/stream", async (c) => {
   const queryParam = c.req.query("query");
   const conversationIdParam = c.req.query("conversationId");
-  const orgId = c.req.query("orgId");
+  const orgId = c.get("user")?.orgId;
 
   if (!queryParam?.trim()) {
     return c.json({ error: "Missing 'query' query parameter" }, 400);
@@ -79,7 +79,6 @@ chat.get("/stream", async (c) => {
   const parsed = chatSchema.safeParse({
     query: queryParam,
     conversationId: conversationIdParam ?? undefined,
-    orgId,
   });
 
   if (!parsed.success) {

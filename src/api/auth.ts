@@ -10,7 +10,7 @@ const auth = new Hono();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function hashPassword(password: string): string {
+export function hashPassword(password: string): string {
   // SHA-256 with a server-side salt (JWT_SECRET). Simple, no external deps.
   const salt = process.env["JWT_SECRET"] ?? "default-salt";
   return createHash("sha256").update(`${salt}:${password}`).digest("hex");

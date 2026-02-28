@@ -7,7 +7,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { ensurePgVector, runMigrations, db } from "./db/client.js";
 import { createHash } from "crypto";
 import { users } from "./db/schema.js";
-import { authMiddleware, optionalAuth, requireWorker } from "./api/middleware/auth.js";
+import { authMiddleware, optionalAuth, requireRole, requireWorker } from "./api/middleware/auth.js";
 import health from "./api/health.js";
 import authRouter from "./api/auth.js";
 import ingest from "./api/ingest.js";
@@ -17,6 +17,7 @@ import topicsRouter from "./api/topics.js";
 import documentsRouter from "./api/documents.js";
 import channelsRouter from "./api/channels.js";
 import internalRouter from "./api/internal.js";
+import adminRouter from "./api/admin.js";
 
 const app = new Hono();
 
@@ -54,6 +55,11 @@ app.route("/documents", documentsRouter);
 // WhatsApp channels — user-facing (uses same auth as other user routes)
 app.use("/channels/*", auth);
 app.route("/channels", channelsRouter);
+
+// Admin endpoints — require admin role
+app.use("/admin/*", auth);
+app.use("/admin/*", requireRole("admin"));
+app.route("/admin", adminRouter);
 
 // Internal worker endpoints — worker JWT auth
 const workerAuth = requireWorker();

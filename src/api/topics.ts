@@ -7,7 +7,6 @@ import { eq, and } from "drizzle-orm";
 const topicsRouter = new Hono();
 
 const createSchema = z.object({
-  orgId: z.string().min(1),
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional(),
 });
@@ -18,14 +17,14 @@ const updateSchema = z.object({
 });
 
 /**
- * GET /topics?orgId=xxx
- * List all topics for an org.
+ * GET /topics
+ * List all topics for the authenticated user's org.
  */
 topicsRouter.get("/", async (c) => {
-  const orgId = c.req.query("orgId");
+  const orgId = c.get("user")?.orgId;
 
   if (!orgId) {
-    return c.json({ error: "orgId query param is required" }, 400);
+    return c.json({ error: "Unauthorized — no orgId in token" }, 401);
   }
 
   const rows = await db
@@ -39,7 +38,7 @@ topicsRouter.get("/", async (c) => {
 
 /**
  * POST /topics
- * Create a new topic.
+ * Create a new topic in the authenticated user's org.
  */
 topicsRouter.post("/", async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -49,7 +48,12 @@ topicsRouter.post("/", async (c) => {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const { orgId, name, description } = parsed.data;
+  const orgId = c.get("user")?.orgId;
+  if (!orgId) {
+    return c.json({ error: "Unauthorized — no orgId in token" }, 401);
+  }
+
+  const { name, description } = parsed.data;
 
   try {
     const [topic] = await db
@@ -69,7 +73,7 @@ topicsRouter.post("/", async (c) => {
 
 /**
  * PATCH /topics/:id
- * Update topic name or description.
+ * Update topic name or description. Only for topics in the user's org.
  */
 topicsRouter.patch("/:id", async (c) => {
   const id = c.req.param("id");
@@ -78,6 +82,11 @@ topicsRouter.patch("/:id", async (c) => {
 
   if (!parsed.success) {
     return c.json({ error: parsed.error.message }, 400);
+  }
+
+  const orgId = c.get("user")?.orgId;
+  if (!orgId) {
+    return c.json({ error: "Unauthorized — no orgId in token" }, 401);
   }
 
   const updates: Partial<{ name: string; description: string | null }> = {};
@@ -91,7 +100,7 @@ topicsRouter.patch("/:id", async (c) => {
   const [updated] = await db
     .update(topics)
     .set(updates)
-    .where(eq(topics.id, id))
+    .where(and(eq(topics.id, id), eq(topics.orgId, orgId)))
     .returning();
 
   if (!updated) {
@@ -103,14 +112,18 @@ topicsRouter.patch("/:id", async (c) => {
 
 /**
  * DELETE /topics/:id
- * Delete a topic. Documents with this topic have their topicId set to NULL (CASCADE SET NULL).
+ * Delete a topic in the user's org. Documents have topicId set to NULL (CASCADE SET NULL).
  */
 topicsRouter.delete("/:id", async (c) => {
   const id = c.req.param("id");
+  const orgId = c.get("user")?.orgId;
+  if (!orgId) {
+    return c.json({ error: "Unauthorized — no orgId in token" }, 401);
+  }
 
   const [deleted] = await db
     .delete(topics)
-    .where(eq(topics.id, id))
+    .where(and(eq(topics.id, id), eq(topics.orgId, orgId)))
     .returning({ id: topics.id });
 
   if (!deleted) {
@@ -122,13 +135,17 @@ topicsRouter.delete("/:id", async (c) => {
 
 /**
  * GET /topics/:id/documents
- * List documents belonging to a topic.
+ * List documents belonging to a topic (only if topic is in user's org).
  */
 topicsRouter.get("/:id/documents", async (c) => {
   const id = c.req.param("id");
+  const orgId = c.get("user")?.orgId;
+  if (!orgId) {
+    return c.json({ error: "Unauthorized — no orgId in token" }, 401);
+  }
 
   const topic = await db.query.topics.findFirst({
-    where: eq(topics.id, id),
+    where: and(eq(topics.id, id), eq(topics.orgId, orgId)),
     columns: { id: true },
   });
 
