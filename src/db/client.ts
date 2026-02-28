@@ -39,7 +39,16 @@ export async function ensurePgVector(): Promise<void> {
 }
 
 export async function runMigrations(): Promise<void> {
-  const base = process.env["NODE_ENV"] === "production" ? "dist" : "src";
-  const migrationsFolder = resolve(base, "db", "migrations");
+  const { existsSync } = await import("fs");
+  const candidates = [
+    resolve(process.cwd(), "dist", "db", "migrations"),
+    resolve(process.cwd(), "src", "db", "migrations"),
+  ];
+  const migrationsFolder = candidates.find((p) => existsSync(resolve(p, "meta", "_journal.json")));
+  if (!migrationsFolder) {
+    console.warn("[migrations] no migrations folder found, skipping");
+    return;
+  }
+  console.log(`[migrations] using ${migrationsFolder}`);
   await migrate(db, { migrationsFolder });
 }
