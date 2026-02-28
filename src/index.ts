@@ -82,6 +82,8 @@ app.onError((err, c) => {
 const PORT = Number(process.env["PORT"] ?? 3000);
 
 async function main() {
+  console.log(`[startup] booting rag-agent-backbone (port=${PORT}, node=${process.version})`);
+
   // Validate required API keys before starting
   const googleKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   if (!googleKey) {
@@ -91,6 +93,7 @@ async function main() {
   }
 
   // Ensure pgvector extension is installed
+  console.log("[startup] connecting to database...");
   await ensurePgVector();
   console.log("[startup] pgvector extension ready");
 
