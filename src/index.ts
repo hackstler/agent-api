@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
-import { ensurePgVector, db } from "./db/client.js";
+import { ensurePgVector, runMigrations, db } from "./db/client.js";
 import { createHash } from "crypto";
 import { users } from "./db/schema.js";
 import { authMiddleware, requireWorker } from "./api/middleware/auth.js";
@@ -79,9 +79,13 @@ async function main() {
     );
   }
 
-  // Ensure pgvector extension is installed (schema is applied by prestart: drizzle-kit push)
+  // Ensure pgvector extension is installed
   await ensurePgVector();
   console.log("[startup] pgvector extension ready");
+
+  // Run pending SQL migrations
+  await runMigrations();
+  console.log("[startup] migrations applied");
 
   // Auto-create admin user on first boot if credentials are configured
   await seedAdminUser();
