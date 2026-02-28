@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import { ragAgent } from "../agent/index.js";
-import { db } from "../db/client.js";
-import { messages, conversations } from "../db/schema.js";
 import { eq } from "drizzle-orm";
+import { ragAgent } from "../agent/index.js";
 import { ragConfig } from "../config/rag.config.js";
+import { db } from "../db/client.js";
+import { conversations } from "../db/schema.js";
+import { persistMessages } from "./helpers/persist-messages.js";
 
 const chat = new Hono();
 
@@ -208,23 +209,6 @@ function extractSources(
     score: c.score,
     excerpt: c.content.slice(0, 200) + (c.content.length > 200 ? "…" : ""),
   }));
-}
-
-async function persistMessages(
-  conversationId: string,
-  userMessage: string,
-  assistantMessage: string,
-  metadata: { model?: string; retrievedChunks?: string[] }
-): Promise<void> {
-  await db.insert(messages).values([
-    { conversationId, role: "user", content: userMessage },
-    { conversationId, role: "assistant", content: assistantMessage, metadata },
-  ]);
-
-  await db
-    .update(conversations)
-    .set({ updatedAt: new Date() })
-    .where(eq(conversations.id, conversationId));
 }
 
 export default chat;

@@ -7,13 +7,15 @@ import { secureHeaders } from "hono/secure-headers";
 import { ensurePgVector, db } from "./db/client.js";
 import { createHash } from "crypto";
 import { users } from "./db/schema.js";
-import { authMiddleware } from "./api/middleware/auth.js";
+import { authMiddleware, requireWorker } from "./api/middleware/auth.js";
 import health from "./api/health.js";
 import authRouter from "./api/auth.js";
 import ingest from "./api/ingest.js";
 import chat from "./api/chat.js";
 import conversationsRouter from "./api/conversations.js";
 import topicsRouter from "./api/topics.js";
+import channelsRouter from "./api/channels.js";
+import internalRouter from "./api/internal.js";
 
 const app = new Hono();
 
@@ -43,6 +45,15 @@ app.route("/ingest", ingest);
 app.route("/chat", chat);
 app.route("/conversations", conversationsRouter);
 app.route("/topics", topicsRouter);
+
+// WhatsApp channels — user-facing (uses same auth as other user routes)
+app.use("/channels/*", auth);
+app.route("/channels", channelsRouter);
+
+// Internal worker endpoints — worker JWT auth
+const workerAuth = requireWorker();
+app.use("/internal/*", workerAuth);
+app.route("/internal", internalRouter);
 
 // 404 handler
 app.notFound((c) => c.json({ error: "Not found" }, 404));

@@ -12,9 +12,15 @@ export interface TokenPayload extends JwtPayload {
   role: "admin" | "user";
 }
 
+export interface WorkerTokenPayload extends JwtPayload {
+  role: "worker";
+  orgId: string;
+}
+
 declare module "hono" {
   interface ContextVariableMap {
     user: TokenPayload;
+    workerOrgId: string;
   }
 }
 
@@ -58,12 +64,16 @@ export function authMiddleware(): MiddlewareHandler {
       return;
     }
 
-    // Option 2: Bearer JWT (user sessions)
+    // Option 2: Bearer JWT (user sessions — reject worker tokens)
     const authHeader = c.req.header("Authorization");
     if (authHeader?.startsWith("Bearer ") && jwtSecret) {
       try {
         const token = authHeader.slice(7);
         const payload = verifyToken(token);
+        // Reject worker tokens — they must use /internal/* routes with requireWorker()
+        if ((payload as Record<string, unknown>)["role"] === "worker") {
+          return c.json({ error: "Forbidden", message: "Worker tokens cannot access user routes" }, 403);
+        }
         c.set("user", payload);
         await next();
         return;
@@ -92,5 +102,44 @@ export function requireRole(...roles: Array<"admin" | "user">): MiddlewareHandle
       return c.json({ error: "Forbidden", message: `Requires role: ${roles.join(" or ")}` }, 403);
     }
     await next();
+  };
+}
+
+// ── requireWorker guard ────────────────────────────────────────────────────────
+
+/**
+ * Middleware for /internal/* routes — only accepts JWTs with role: "worker".
+ * Extracts orgId from the token and sets c.var.workerOrgId.
+ */
+export function requireWorker(): MiddlewareHandler {
+  return async (c, next) => {
+    const jwtSecret = process.env["JWT_SECRET"];
+    if (!jwtSecret) {
+      return c.json({ error: "JWT_SECRET not configured" }, 500);
+    }
+
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return c.json({ error: "Unauthorized", message: "Bearer token required" }, 401);
+    }
+
+    try {
+      const token = authHeader.slice(7);
+      const payload = verify(token, jwtSecret) as Record<string, unknown>;
+
+      if (payload["role"] !== "worker") {
+        return c.json({ error: "Forbidden", message: "Worker token required" }, 403);
+      }
+
+      const orgId = payload["orgId"];
+      if (typeof orgId !== "string" || !orgId) {
+        return c.json({ error: "Forbidden", message: "Missing orgId in worker token" }, 403);
+      }
+
+      c.set("workerOrgId", orgId);
+      await next();
+    } catch {
+      return c.json({ error: "Unauthorized", message: "Invalid or expired token" }, 401);
+    }
   };
 }

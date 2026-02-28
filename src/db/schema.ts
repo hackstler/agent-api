@@ -123,6 +123,16 @@ export const documents = pgTable(
   })
 );
 
+export const whatsappSessions = pgTable("whatsapp_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: text("org_id").notNull().unique(),
+  status: text("status").notNull().default("disconnected"),
+  // 'disconnected' | 'qr' | 'connected'
+  qrData: text("qr_data"),
+  phone: text("phone"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Embedding dimension: 768 for Gemini gemini-embedding-001 (default)
 // 1536 for OpenAI text-embedding-3-small — set EMBEDDING_DIM env var to override
 const EMBEDDING_DIM = Number(process.env["EMBEDDING_DIM"] ?? 768);
@@ -193,6 +203,8 @@ export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
   }),
 }));
 
+// whatsappSessions has no relations — standalone table
+
 // ============================================================
 // Types
 // ============================================================
@@ -209,3 +221,5 @@ export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+export type WhatsappSession = typeof whatsappSessions.$inferSelect;
+export type NewWhatsappSession = typeof whatsappSessions.$inferInsert;
