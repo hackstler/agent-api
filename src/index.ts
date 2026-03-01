@@ -4,87 +4,131 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
-import { ensurePgVector, runMigrations, db } from "./db/client.js";
-import { createHash } from "crypto";
-import { users } from "./db/schema.js";
+import { ensurePgVector, runMigrations } from "./db/client.js";
 import { authMiddleware, optionalAuth, requireRole, requireWorker } from "./api/middleware/auth.js";
+import { errorHandler, domainErrorToHttpStatus } from "./api/middleware/error-handler.middleware.js";
+import { DomainError } from "./domain/errors/index.js";
+
+// Infrastructure — repositories
+import { DrizzleUserRepository } from "./infrastructure/repositories/drizzle-user.repository.js";
+import { DrizzleDocumentRepository } from "./infrastructure/repositories/drizzle-document.repository.js";
+import { DrizzleConversationRepository } from "./infrastructure/repositories/drizzle-conversation.repository.js";
+import { DrizzleWhatsAppSessionRepository } from "./infrastructure/repositories/drizzle-whatsapp-session.repository.js";
+import { DrizzleTopicRepository } from "./infrastructure/repositories/drizzle-topic.repository.js";
+
+// Application — managers
+import { UserManager } from "./application/managers/user.manager.js";
+import { DocumentManager } from "./application/managers/document.manager.js";
+import { ConversationManager } from "./application/managers/conversation.manager.js";
+import { WhatsAppManager } from "./application/managers/whatsapp.manager.js";
+import { TopicManager } from "./application/managers/topic.manager.js";
+import { OrganizationManager } from "./application/managers/organization.manager.js";
+
+// API — controllers (factory functions)
+import { createAuthController } from "./api/controllers/auth.controller.js";
+import { createDocumentController } from "./api/controllers/document.controller.js";
+import { createConversationController } from "./api/controllers/conversation.controller.js";
+import { createChannelController } from "./api/controllers/channel.controller.js";
+import { createInternalController } from "./api/controllers/internal.controller.js";
+import { createAdminController } from "./api/controllers/admin.controller.js";
+import { createTopicController } from "./api/controllers/topic.controller.js";
+
+// Agent (for internal controller injection)
+import { ragAgent } from "./agent/index.js";
+
+// API — routes NOT yet refactored (RAG pipeline, ingestion, health)
 import health from "./api/health.js";
-import authRouter from "./api/auth.js";
 import ingest from "./api/ingest.js";
 import chat from "./api/chat.js";
-import conversationsRouter from "./api/conversations.js";
-import topicsRouter from "./api/topics.js";
-import documentsRouter from "./api/documents.js";
-import channelsRouter from "./api/channels.js";
-import internalRouter from "./api/internal.js";
-import adminRouter from "./api/admin.js";
 
 const app = new Hono();
 
-// Middleware
+// ── Global middleware ──────────────────────────────────────────────────────────
 app.use("*", logger());
 app.use("*", secureHeaders());
 app.use(
   "*",
   cors({
     origin: process.env["ALLOWED_ORIGINS"]?.split(",") ?? "*",
-    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
   })
 );
+app.use("*", errorHandler());
 
-// Routes
-app.route("/health", health);                          // public — no auth
+// ── Composition root ───────────────────────────────────────────────────────────
+
+// Password salt — same secret used for JWT signing (stable across restarts)
+const PASSWORD_SALT = process.env["JWT_SECRET"] ?? "default-salt";
+
+// 1. Repositories
+const userRepo = new DrizzleUserRepository();
+const docRepo = new DrizzleDocumentRepository();
+const convRepo = new DrizzleConversationRepository();
+const sessionRepo = new DrizzleWhatsAppSessionRepository();
+const topicRepo = new DrizzleTopicRepository();
+
+// 2. Managers
+const userManager = new UserManager(userRepo, PASSWORD_SALT);
+const docManager = new DocumentManager(docRepo);
+const convManager = new ConversationManager(convRepo);
+const waManager = new WhatsAppManager(sessionRepo, userRepo);
+const topicManager = new TopicManager(topicRepo);
+const orgManager = new OrganizationManager(userRepo, docRepo, topicRepo, sessionRepo, PASSWORD_SALT);
+
+// ── Routes ─────────────────────────────────────────────────────────────────────
+
+app.route("/health", health);                              // public
 
 const auth = authMiddleware();
-app.use("/auth/me", auth);                             // /auth/me needs JWT
-app.use("/auth/register", optionalAuth());             // register parses JWT if present (admin check)
-app.route("/auth", authRouter);                        // login is public
+app.use("/auth/me", auth);
+app.use("/auth/register", optionalAuth());
+app.route("/auth", createAuthController(userManager));
+
 app.use("/ingest/*", auth);
 app.use("/chat/*", auth);
 app.use("/conversations/*", auth);
 app.use("/topics/*", auth);
 app.use("/documents/*", auth);
 
-app.route("/ingest", ingest);
-app.route("/chat", chat);
-app.route("/conversations", conversationsRouter);
-app.route("/topics", topicsRouter);
-app.route("/documents", documentsRouter);
+app.route("/ingest", ingest);                              // not yet refactored
+app.route("/chat", chat);                                  // not yet refactored
+app.route("/conversations", createConversationController(convManager));
+app.route("/topics", createTopicController(topicManager));
+app.route("/documents", createDocumentController(docManager));
 
-// WhatsApp channels — user-facing (uses same auth as other user routes)
+// WhatsApp channels — user-facing
 app.use("/channels/*", auth);
-app.route("/channels", channelsRouter);
+app.route("/channels", createChannelController(waManager));
 
 // Admin endpoints — require admin role
 app.use("/admin/*", auth);
 app.use("/admin/*", requireRole("admin"));
-app.route("/admin", adminRouter);
+app.route("/admin", createAdminController(userManager, orgManager));
 
 // Internal worker endpoints — worker JWT auth
 const workerAuth = requireWorker();
 app.use("/internal/*", workerAuth);
-app.route("/internal", internalRouter);
+app.route("/internal", createInternalController(waManager, convManager, ragAgent));
 
-// 404 handler
+// ── 404 + error fallback ───────────────────────────────────────────────────────
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
-// Error handler
 app.onError((err, c) => {
+  if (err instanceof DomainError) {
+    const status = domainErrorToHttpStatus(err) as 400 | 401 | 403 | 404 | 409;
+    return c.json({ error: err.message }, status);
+  }
   console.error("[error]", err);
-  return c.json(
-    { error: "Internal server error", message: err.message },
-    500
-  );
+  return c.json({ error: "Internal server error", message: err.message }, 500);
 });
 
-// Startup
+// ── Startup ────────────────────────────────────────────────────────────────────
 const PORT = Number(process.env["PORT"] ?? 3000);
 
 async function main() {
   console.log(`[startup] booting rag-agent-backbone (port=${PORT}, node=${process.version})`);
 
-  // Validate required API keys before starting
   const googleKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   if (!googleKey) {
     throw new Error(
@@ -92,16 +136,13 @@ async function main() {
     );
   }
 
-  // Ensure pgvector extension is installed
   console.log("[startup] connecting to database...");
   await ensurePgVector();
   console.log("[startup] pgvector extension ready");
 
-  // Run pending SQL migrations
   await runMigrations();
   console.log("[startup] migrations applied");
 
-  // Auto-create admin user on first boot if credentials are configured
   await seedAdminUser();
 
   serve({ fetch: app.fetch, port: PORT }, () => {
@@ -113,19 +154,13 @@ async function main() {
 async function seedAdminUser() {
   const username = process.env["ADMIN_USERNAME"];
   const password = process.env["ADMIN_PASSWORD"];
-  const jwtSecret = process.env["JWT_SECRET"];
 
-  if (!username || !password || !jwtSecret) return;
+  if (!username || !password || !process.env["JWT_SECRET"]) return;
 
-  const [existing] = await db.select({ id: users.id }).from(users).limit(1);
-  if (existing) return; // ya hay usuarios, no tocar
+  const count = await userManager.countUsers();
+  if (count > 0) return;
 
-  const passwordHash = createHash("sha256").update(`${jwtSecret}:${password}`).digest("hex");
-  await db.insert(users).values({
-    email: username,
-    orgId: username,
-    metadata: { passwordHash, role: "admin" },
-  });
+  await userManager.create({ username, password, orgId: username, role: "admin" });
   console.log(`[startup] Admin user '${username}' created`);
 }
 
