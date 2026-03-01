@@ -7,6 +7,7 @@ import { ragAgent } from "../agent/index.js";
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "./helpers/extract-sources.js";
 import { persistMessages } from "./helpers/persist-messages.js";
+import { formatForWhatsApp, buildSourcesFooter } from "./helpers/format-whatsapp.js";
 
 const internal = new Hono();
 
@@ -157,7 +158,10 @@ internal.post("/whatsapp/message", async (c) => {
       retrievedChunks: sources.map((s) => s.id),
     });
 
-    return c.json({ data: { reply: result.text } });
+    // Format for WhatsApp: strip markdown + append sources with URLs
+    const waText = formatForWhatsApp(result.text) + buildSourcesFooter(sources);
+
+    return c.json({ data: { reply: waText } });
   } catch (error) {
     console.error("[internal/message] RAG agent error:", error);
     return c.json({ error: "RAG agent unavailable" }, 503);
