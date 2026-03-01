@@ -1,7 +1,6 @@
 import { Hono } from "hono";
-import type { Context } from "hono";
 import { z } from "zod";
-import { sql } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { whatsappSessions, conversations, users } from "../db/schema.js";
 import { ragAgent } from "../agent/index.js";
@@ -15,50 +14,54 @@ const internal = new Hono();
 
 const qrSchema = z.object({
   qrData: z.string().min(1),
-  orgId: z.string().min(1).optional(),
+  userId: z.string().uuid(),
 });
 
 const statusSchema = z.object({
   status: z.enum(["connected", "disconnected"]),
   phone: z.string().optional(),
-  orgId: z.string().min(1).optional(),
+  userId: z.string().uuid(),
 });
 
 const messageSchema = z.object({
   messageId: z.string().min(1),
   body: z.string().min(1).max(10_000),
   chatId: z.string().min(1),
-  orgId: z.string().min(1).optional(),
+  userId: z.string().uuid(),
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Resolve orgId: JWT first (legacy single-org workers), body as fallback (multi-org workers).
+ * Look up a user by ID and return their orgId.
+ * Returns null if user not found.
  */
-function resolveOrgId(c: Context, bodyOrgId?: string): string | null {
-  return c.get("workerOrgId") ?? bodyOrgId ?? null;
+async function resolveOrgIdFromUser(userId: string): Promise<string | null> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { orgId: true },
+  });
+  return user?.orgId ?? null;
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 /**
- * GET /internal/whatsapp/orgs
- * Returns all distinct org IDs that have at least one user.
+ * GET /internal/whatsapp/sessions
+ * Returns all active (non-disconnected) WhatsApp sessions with userId and orgId.
  */
-internal.get("/whatsapp/orgs", async (c) => {
+internal.get("/whatsapp/sessions", async (c) => {
   const rows = await db
-    .selectDistinct({ orgId: users.orgId })
-    .from(users)
-    .where(sql`${users.orgId} IS NOT NULL`);
+    .select({ userId: whatsappSessions.userId, orgId: whatsappSessions.orgId })
+    .from(whatsappSessions)
+    .where(ne(whatsappSessions.status, "disconnected"));
 
-  const orgIds = rows.map((r) => r.orgId).filter((id): id is string => id !== null);
-  return c.json({ data: orgIds });
+  return c.json({ data: rows });
 });
 
 /**
  * POST /internal/whatsapp/qr
- * Worker reports a new QR code for its org.
+ * Worker reports a new QR code for a user session.
  */
 internal.post("/whatsapp/qr", async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -68,25 +71,27 @@ internal.post("/whatsapp/qr", async (c) => {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const orgId = resolveOrgId(c, parsed.data.orgId);
+  const { userId, qrData } = parsed.data;
+
+  const orgId = await resolveOrgIdFromUser(userId);
   if (!orgId) {
-    return c.json({ error: "orgId required (JWT or body)" }, 400);
+    return c.json({ error: "User not found" }, 404);
   }
 
   await db
     .insert(whatsappSessions)
-    .values({ orgId, status: "qr", qrData: parsed.data.qrData })
+    .values({ userId, orgId, status: "qr", qrData })
     .onConflictDoUpdate({
-      target: whatsappSessions.orgId,
-      set: { status: "qr", qrData: parsed.data.qrData, phone: null, updatedAt: new Date() },
+      target: whatsappSessions.userId,
+      set: { status: "qr", qrData, phone: null, updatedAt: new Date() },
     });
 
-  return c.json({ data: { status: "qr", orgId } });
+  return c.json({ data: { status: "qr", userId, orgId } });
 });
 
 /**
  * POST /internal/whatsapp/status
- * Worker reports connection status change.
+ * Worker reports connection status change for a user session.
  */
 internal.post("/whatsapp/status", async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -96,27 +101,27 @@ internal.post("/whatsapp/status", async (c) => {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const orgId = resolveOrgId(c, parsed.data.orgId);
-  if (!orgId) {
-    return c.json({ error: "orgId required (JWT or body)" }, 400);
-  }
+  const { userId, status, phone } = parsed.data;
 
-  const { status, phone } = parsed.data;
+  const orgId = await resolveOrgIdFromUser(userId);
+  if (!orgId) {
+    return c.json({ error: "User not found" }, 404);
+  }
 
   await db
     .insert(whatsappSessions)
-    .values({ orgId, status, phone: phone ?? null, qrData: null })
+    .values({ userId, orgId, status, phone: phone ?? null, qrData: null })
     .onConflictDoUpdate({
-      target: whatsappSessions.orgId,
+      target: whatsappSessions.userId,
       set: {
         status,
         phone: phone ?? null,
-        qrData: null, // clear QR on status change
+        qrData: null,
         updatedAt: new Date(),
       },
     });
 
-  return c.json({ data: { status, orgId, phone: phone ?? null } });
+  return c.json({ data: { status, userId, orgId, phone: phone ?? null } });
 });
 
 /**
@@ -131,16 +136,15 @@ internal.post("/whatsapp/message", async (c) => {
     return c.json({ error: parsed.error.message }, 400);
   }
 
-  const orgId = resolveOrgId(c, parsed.data.orgId);
+  const { userId, body: messageBody, chatId } = parsed.data;
+
+  const orgId = await resolveOrgIdFromUser(userId);
   if (!orgId) {
-    return c.json({ error: "orgId required (JWT or body)" }, 400);
+    return c.json({ error: "User not found" }, 404);
   }
 
-  const { body: messageBody, chatId } = parsed.data;
-
   try {
-    // Use chatId as conversation thread, orgId as resource for multi-tenancy
-    const conversationId = await resolveConversationId(chatId, orgId);
+    const conversationId = await resolveConversationId(chatId, userId);
 
     const result = await ragAgent.generate(messageBody, {
       memory: { thread: conversationId, resource: orgId },
@@ -166,11 +170,9 @@ internal.post("/whatsapp/message", async (c) => {
  * Resolve or create a conversation for a WhatsApp chatId.
  * Uses a deterministic title so repeated calls from the same chat reuse the conversation.
  */
-async function resolveConversationId(chatId: string, orgId: string): Promise<string> {
-  // Look for an existing conversation for this WhatsApp chat
+async function resolveConversationId(chatId: string, userId: string): Promise<string> {
   const existing = await db.query.conversations.findFirst({
-    where: (conv, { and, eq }) =>
-      and(eq(conv.title, `whatsapp:${chatId}`)),
+    where: (conv, { eq }) => eq(conv.title, `whatsapp:${chatId}`),
     columns: { id: true },
   });
 
@@ -178,7 +180,7 @@ async function resolveConversationId(chatId: string, orgId: string): Promise<str
 
   const [conv] = await db
     .insert(conversations)
-    .values({ title: `whatsapp:${chatId}` })
+    .values({ title: `whatsapp:${chatId}`, userId })
     .returning({ id: conversations.id });
 
   return conv!.id;

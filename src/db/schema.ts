@@ -136,9 +136,13 @@ export const documents = pgTable(
 
 export const whatsappSessions = pgTable("whatsapp_sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  orgId: text("org_id").notNull().unique(),
+  orgId: text("org_id").notNull(),
+  userId: uuid("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("disconnected"),
-  // 'disconnected' | 'qr' | 'connected'
+  // 'disconnected' | 'pending' | 'qr' | 'connected'
   qrData: text("qr_data"),
   phone: text("phone"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -185,8 +189,9 @@ export const documentChunks = pgTable(
 // Relations
 // ============================================================
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   conversations: many(conversations),
+  whatsappSession: one(whatsappSessions),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -217,7 +222,12 @@ export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
   }),
 }));
 
-// whatsappSessions has no relations — standalone table
+export const whatsappSessionsRelations = relations(whatsappSessions, ({ one }) => ({
+  user: one(users, {
+    fields: [whatsappSessions.userId],
+    references: [users.id],
+  }),
+}));
 
 // ============================================================
 // Types
