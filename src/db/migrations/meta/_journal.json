@@ -22,6 +22,13 @@
       "when": 1772381000000,
       "tag": "0002_whatsapp_per_user",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1772382000000,
+      "tag": "0003_drop_org_id_unique",
+      "breakpoints": true
     }
   ]
 }
