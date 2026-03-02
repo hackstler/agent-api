@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
+    "test:unit": "vitest run src/__tests__/unit/",
+    "test:integration": "vitest run src/__tests__/integration/",
+    "test:all": "vitest run src/__tests__/unit/ src/__tests__/integration/",
     "test:watch": "vitest"
   },
   "dependencies": {
