@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { db } from "../db/client.js";
-import { topics, documents } from "../db/schema.js";
+import { db } from "../infrastructure/db/client.js";
+import { topics, documents } from "../infrastructure/db/schema.js";
 import { eq, and } from "drizzle-orm";
 
 const topicsRouter = new Hono();

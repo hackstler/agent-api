@@ -53,9 +53,9 @@ export interface RagConfig {
 
 // Default config — overridden by /setup wizard answers or env vars
 const defaultConfig: RagConfig = {
-  agentName: process.env["AGENT_NAME"] ?? "Emilio",
-  agentDescription: process.env["AGENT_DESCRIPTION"] ?? "Un asistente personal inteligente que recuerda todo lo que le compartes — vídeos, notas, ideas, enlaces — y te ayuda a recuperar esa información cuando la necesitas.",
-  responseLanguage: process.env["AGENT_LANGUAGE"] ?? "es",
+  agentName: process.env["AGENT_NAME"] ?? "Assistant",
+  agentDescription: process.env["AGENT_DESCRIPTION"] ?? "A smart personal assistant that remembers everything you share — videos, notes, ideas, links — and helps you retrieve that information when you need it.",
+  responseLanguage: process.env["AGENT_LANGUAGE"] ?? "en",
   useCase: "custom",
 
   topK: Number(process.env["RAG_TOP_K"] ?? 10),

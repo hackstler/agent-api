@@ -20,13 +20,9 @@ import { OrganizationManager } from "./application/managers/organization.manager
 // Plugins
 import { PluginRegistry } from "./plugins/plugin-registry.js";
 import { RagPlugin } from "./plugins/rag/index.js";
-import { QuotePlugin } from "./plugins/quote/index.js";
 
 // Coordinator agent
 import { createCoordinatorAgent } from "./agent/coordinator.js";
-
-// Catalog seed
-import { seedCatalog } from "./infrastructure/db/catalog-seed.js";
 
 // Auth strategy
 import { authConfig } from "./config/auth.config.js";
@@ -62,7 +58,6 @@ const orgManager = new OrganizationManager(userRepo, docRepo, topicRepo, session
 const pluginRegistry = new PluginRegistry();
 const ragPlugin = new RagPlugin();
 pluginRegistry.register(ragPlugin);
-pluginRegistry.register(new QuotePlugin());
 
 // 4. Coordinator agent (uses all plugin tools)
 const coordinatorAgent = createCoordinatorAgent(pluginRegistry);
@@ -108,16 +103,6 @@ async function main() {
   await pluginRegistry.ensureTablesForAll();
 
   await seedAdminUser();
-
-  const adminOrg = process.env["ADMIN_USERNAME"] ?? "default";
-  try {
-    await seedCatalog(adminOrg);
-  } catch (err) {
-    console.error(
-      "[seed:catalog] Failed to seed catalog:",
-      err instanceof Error ? err.message : err
-    );
-  }
 
   await pluginRegistry.initializeAll();
 
