@@ -14,9 +14,14 @@ function createDelegationTool(plugin: Plugin) {
     inputSchema: z.object({
       query: z.string().describe("The user query or instruction to delegate"),
       orgId: z.string().optional().describe("Organization ID for multi-tenant context"),
+      userId: z.string().optional().describe("User ID for per-user services like Gmail and Calendar"),
     }),
-    execute: async ({ query, orgId }) => {
-      const enriched = orgId ? `${query}\n[org:${orgId}]` : query;
+    execute: async ({ query, orgId, userId }) => {
+      const tags = [
+        orgId ? `[org:${orgId}]` : "",
+        userId ? `[userId:${userId}]` : "",
+      ].filter(Boolean).join("");
+      const enriched = tags ? `${query}\n${tags}` : query;
 
       // Generate WITHOUT memory — the coordinator already manages conversation memory.
       const result = await plugin.agent.generate(enriched);
