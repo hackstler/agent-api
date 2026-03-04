@@ -8,6 +8,13 @@
       "when": 1772656179199,
       "tag": "0000_flawless_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772656200000,
+      "tag": "0005_add_role_column_require_org_id",
+      "breakpoints": true
     }
   ]
 }
