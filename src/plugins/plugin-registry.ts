@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import type { ToolsInput } from "@mastra/core/agent";
 import type { Plugin } from "./plugin.interface.js";
+import { createDelegationTools } from "../agent/delegation.js";
 
 export class PluginRegistry {
   private plugins = new Map<string, Plugin>();
@@ -31,6 +32,10 @@ export class PluginRegistry {
       Object.assign(tools, plugin.tools);
     }
     return tools;
+  }
+
+  getDelegationTools(): ToolsInput {
+    return createDelegationTools(this.getAll());
   }
 
   mountRoutes(app: Hono): void {

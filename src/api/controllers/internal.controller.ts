@@ -42,6 +42,43 @@ interface QuoteToolPayload {
 }
 
 /**
+ * Unwraps nested toolResults from delegation steps.
+ *
+ * When the coordinator delegates to a sub-agent, the delegation tool returns
+ * { text, toolResults } inside a Mastra payload wrapper. This function extracts
+ * the nested toolResults so that extractSources() and extractPdfFromSteps()
+ * can find them as if the tools had been called directly.
+ */
+function unwrapDelegationSteps(
+  steps: Array<{ toolResults?: Array<unknown> }>
+): Array<{ toolResults?: Array<unknown> }> {
+  const unwrapped: Array<{ toolResults?: Array<unknown> }> = [];
+
+  for (const step of steps) {
+    const allToolResults = step.toolResults ?? [];
+
+    const delegationResult = allToolResults.find((r) => {
+      const payload = (r as { payload?: { toolName?: string } }).payload;
+      return payload?.toolName?.startsWith("delegate-to-");
+    });
+
+    if (delegationResult) {
+      const payload = (delegationResult as {
+        payload: { result?: { toolResults?: Array<unknown> } };
+      }).payload;
+      const nested = payload.result?.toolResults ?? [];
+      if (nested.length > 0) {
+        unwrapped.push({ toolResults: nested });
+      }
+    } else {
+      unwrapped.push(step);
+    }
+  }
+
+  return unwrapped.length > 0 ? unwrapped : steps;
+}
+
+/**
  * Extracts a PDF attachment from the agent's tool result steps.
  * Follows the same Mastra 1.5 pattern as extractSources().
  */
@@ -129,8 +166,9 @@ export function createInternalController(
         memory: { thread: conversationId, resource: orgId },
       });
 
-      const sources = extractSources(result.steps ?? []);
-      const pdfAttachment = extractPdfFromSteps(result.steps ?? []);
+      const steps = unwrapDelegationSteps(result.steps ?? []);
+      const sources = extractSources(steps);
+      const pdfAttachment = extractPdfFromSteps(steps);
 
       await persistMessages(conversationId, messageBody, result.text, {
         model: ragConfig.llmModel,

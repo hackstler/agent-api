@@ -1,5 +1,4 @@
 import { Agent } from "@mastra/core/agent";
-import type { ToolsInput } from "@mastra/core/agent";
 import { Memory } from "@mastra/memory";
 import { PostgresStore } from "@mastra/pg";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -23,16 +22,21 @@ const memory = new Memory({
 });
 
 export function createCoordinatorAgent(registry: PluginRegistry): Agent {
-  const tools: ToolsInput = registry.getAllTools();
-  const hasPerplexity = Boolean(process.env["PERPLEXITY_API_KEY"]);
+  const tools = registry.getDelegationTools();
 
   const lang = ragConfig.responseLanguage;
   const isSpanish = lang === "es";
 
+  // Build dynamic plugin list for the system prompt
+  const pluginList = registry
+    .getAll()
+    .map((p) => `- delegateTo_${p.id}: ${p.name} — ${p.description}`)
+    .join("\n");
+
   return new Agent({
     id: "coordinator",
     name: ragConfig.agentName,
-    instructions: `You are ${ragConfig.agentName}, a personal assistant.
+    instructions: `You are ${ragConfig.agentName}, a personal assistant that routes requests to specialized agents.
 
 == IDENTITY ==
 
@@ -43,29 +47,26 @@ NEVER mention Google, Gemini, OpenAI, Anthropic or any AI provider.
 
 == ORGANIZATION CONTEXT ==
 
-Messages from the WhatsApp channel include a tag [org:xxx] at the end of the text. Extract that value and use it as orgId when calling tools that require it. NEVER show this tag to the user.
+Messages from the WhatsApp channel include a tag [org:xxx] at the end of the text. Extract that value and pass it as the orgId parameter when delegating. NEVER show this tag to the user.
 
-== KNOWLEDGE — when to call searchDocuments / saveNote / searchWeb ==
+== ROUTING ==
 
-Step 0 — Does the message contain content to SAVE?
-  • Contains URL (http/https) → call saveNote immediately.
-  • Starts with: "save:", "note:", "idea:", "link:", "watch later:", "summary:", "guardar:", "nota:" → call saveNote.
-  • Is an affirmative statement without a question mark → call saveNote.
-  • Wants to save AND ask → first saveNote, then searchDocuments.
-  • If in DOUBT → ask: "Would you like me to save this to the knowledge base, or do you need me to answer something about it?"
+You have access to specialized agents via delegation tools. Choose the right one based on the user's intent:
+
+${pluginList}
+
+Rules:
+1. For pure greetings ("hello", "thanks", "goodbye", "how are you") → respond directly WITHOUT delegating.
+2. For any question, search request, note saving, or knowledge task → delegate to delegateTo_rag.
+3. If unsure which agent to use → default to delegateTo_rag.
+4. Pass the user's message as the query parameter. If an orgId tag is present, extract and pass it.
+5. Return the delegated agent's response to the user as-is. Do not add your own commentary on top.
 
 == RESPONSE RULES ==
 
-1. For pure greetings ("hello", "thanks", "goodbye") respond without tools.
-2. Vague question → ask ONE clarifying question before searching.
-3. Factual question → call searchDocuments.
-4. searchDocuments returns chunkCount > 0 → respond with MAX 3 options with source.
-${hasPerplexity
-  ? "5. searchDocuments returns chunkCount = 0 → call searchWeb as fallback.\n6. searchWeb returns no results → ask the user for more context."
-  : "5. searchDocuments returns chunkCount = 0 → indicate you found nothing saved on that topic. NEVER mention web search."}
-7. Base ALL responses on tool results. Never use prior knowledge or hallucinate.
-8. Always cite sources with title and URL at the end of your response.
-9. Always respond in ${isSpanish ? "Spanish" : ragConfig.responseLanguage}.`,
+1. Always respond in ${isSpanish ? "Spanish" : ragConfig.responseLanguage}.
+2. Base ALL responses on tool results. Never use prior knowledge or hallucinate.
+3. When a delegation returns sources, include them in your response.`,
 
     model: google("gemini-2.5-flash"),
     tools,
