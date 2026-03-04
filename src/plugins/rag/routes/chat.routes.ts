@@ -35,9 +35,11 @@ export function createChatRoutes(agent: Agent): Hono {
 
     const { query } = parsed.data;
     const orgId = c.get("user")?.orgId;
+    const userId = c.get("user")?.userId;
     const conversationId = await resolveConversationId(parsed.data.conversationId);
+    const enrichedQuery = `${query}\n[org:${orgId ?? "anonymous"}][userId:${userId ?? "anonymous"}]`;
 
-    const result = await agent.generate(query, {
+    const result = await agent.generate(enrichedQuery, {
       memory: { thread: conversationId, resource: orgId ?? "anonymous" },
     });
 
@@ -67,6 +69,7 @@ export function createChatRoutes(agent: Agent): Hono {
     const queryParam = c.req.query("query");
     const conversationIdParam = c.req.query("conversationId");
     const orgId = c.get("user")?.orgId;
+    const userId = c.get("user")?.userId;
 
     if (!queryParam?.trim()) {
       return c.json({ error: "Missing 'query' query parameter" }, 400);
@@ -94,7 +97,8 @@ export function createChatRoutes(agent: Agent): Hono {
       const collectedSources: Array<{ id: string; documentTitle: string; documentSource: string; score: number; excerpt: string }> = [];
 
       try {
-        const agentStream = await agent.stream(parsed.data.query, {
+        const enrichedQuery = `${parsed.data.query}\n[org:${orgId ?? "anonymous"}][userId:${userId ?? "anonymous"}]`;
+        const agentStream = await agent.stream(enrichedQuery, {
           memory: { thread: conversationId, resource: orgId ?? "anonymous" },
         });
 

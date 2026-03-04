@@ -16,6 +16,7 @@ import type { Agent } from "@mastra/core/agent";
 import type { PluginRegistry } from "./plugins/plugin-registry.js";
 import type { AuthConfig } from "./config/auth.config.js";
 import type { AuthStrategy } from "./domain/ports/auth-strategy.js";
+import type { OAuthManager } from "./application/managers/oauth.manager.js";
 
 import { createAuthController } from "./api/controllers/auth.controller.js";
 import { createDocumentController } from "./api/controllers/document.controller.js";
@@ -24,6 +25,7 @@ import { createChannelController } from "./api/controllers/channel.controller.js
 import { createInternalController } from "./api/controllers/internal.controller.js";
 import { createAdminController } from "./api/controllers/admin.controller.js";
 import { createTopicController } from "./api/controllers/topic.controller.js";
+import { createOAuthController } from "./api/controllers/oauth.controller.js";
 import health from "./api/health.js";
 
 export interface AppDependencies {
@@ -37,6 +39,7 @@ export interface AppDependencies {
   pluginRegistry?: PluginRegistry;
   authConfig: AuthConfig;
   authStrategy: AuthStrategy | null;
+  oauthManager?: OAuthManager;
 }
 
 export function createApp(deps: AppDependencies): Hono {
@@ -61,7 +64,14 @@ export function createApp(deps: AppDependencies): Hono {
   const auth = authMiddleware();
   app.use("/auth/me", auth);
   app.use("/auth/register", optionalAuth());
+  // OAuth routes: authorize, status, disconnect require auth; callback does NOT (Google redirect)
+  app.use("/auth/google/authorize", auth);
+  app.use("/auth/google/status", auth);
+  app.use("/auth/google/disconnect", auth);
   app.route("/auth", createAuthController(deps.userManager, deps.authConfig, deps.authStrategy));
+  if (deps.oauthManager) {
+    app.route("/auth", createOAuthController(deps.oauthManager));
+  }
 
   // Auth middleware BEFORE plugin routes (plugins mount /chat, /ingest, etc.)
   app.use("/ingest/*", auth);

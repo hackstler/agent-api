@@ -8,6 +8,7 @@ import { DrizzleDocumentRepository } from "./infrastructure/repositories/drizzle
 import { DrizzleConversationRepository } from "./infrastructure/repositories/drizzle-conversation.repository.js";
 import { DrizzleWhatsAppSessionRepository } from "./infrastructure/repositories/drizzle-whatsapp-session.repository.js";
 import { DrizzleTopicRepository } from "./infrastructure/repositories/drizzle-topic.repository.js";
+import { DrizzleOAuthTokenRepository } from "./infrastructure/repositories/drizzle-oauth-token.repository.js";
 
 // Application — managers
 import { UserManager } from "./application/managers/user.manager.js";
@@ -16,6 +17,7 @@ import { ConversationManager } from "./application/managers/conversation.manager
 import { WhatsAppManager } from "./application/managers/whatsapp.manager.js";
 import { TopicManager } from "./application/managers/topic.manager.js";
 import { OrganizationManager } from "./application/managers/organization.manager.js";
+import { OAuthManager } from "./application/managers/oauth.manager.js";
 
 // Plugins
 import { PluginRegistry } from "./plugins/plugin-registry.js";
@@ -23,7 +25,7 @@ import { RagPlugin } from "./plugins/rag/index.js";
 import { YouTubePlugin } from "./plugins/youtube/index.js";
 import { GmailPlugin } from "./plugins/gmail/index.js";
 import { CalendarPlugin } from "./plugins/calendar/index.js";
-import { StubOAuthProvider } from "./plugins/google-common/index.js";
+import { OAuthManagerAdapter } from "./plugins/google-common/oauth-manager-adapter.js";
 
 // Coordinator agent
 import { createCoordinatorAgent } from "./agent/coordinator.js";
@@ -49,6 +51,7 @@ const docRepo = new DrizzleDocumentRepository();
 const convRepo = new DrizzleConversationRepository();
 const sessionRepo = new DrizzleWhatsAppSessionRepository();
 const topicRepo = new DrizzleTopicRepository();
+const oauthTokenRepo = new DrizzleOAuthTokenRepository();
 
 // 2. Managers
 const userManager = new UserManager(userRepo, PASSWORD_SALT);
@@ -57,6 +60,7 @@ const convManager = new ConversationManager(convRepo);
 const waManager = new WhatsAppManager(sessionRepo, userRepo);
 const topicManager = new TopicManager(topicRepo);
 const orgManager = new OrganizationManager(userRepo, docRepo, topicRepo, sessionRepo, PASSWORD_SALT);
+const oauthManager = new OAuthManager(oauthTokenRepo);
 
 // 3. Plugin registry
 const pluginRegistry = new PluginRegistry();
@@ -64,13 +68,15 @@ const ragPlugin = new RagPlugin();
 pluginRegistry.register(ragPlugin);
 pluginRegistry.register(new YouTubePlugin());
 
-const oauthProvider = new StubOAuthProvider();
-// FUTURO: const oauthProvider = new OAuthManagerAdapter(oAuthManager);
+const oauthProvider = new OAuthManagerAdapter(oauthManager);
 pluginRegistry.register(new GmailPlugin(oauthProvider));
 pluginRegistry.register(new CalendarPlugin(oauthProvider));
 
 // 4. Coordinator agent (uses all plugin tools)
 const coordinatorAgent = createCoordinatorAgent(pluginRegistry);
+
+// Wire coordinator into RAG plugin so /chat uses coordinator (enables Gmail/Calendar from dashboard)
+ragPlugin.setCoordinatorAgent(coordinatorAgent);
 
 // 5. Create app
 const app = createApp({
@@ -84,6 +90,7 @@ const app = createApp({
   pluginRegistry,
   authConfig,
   authStrategy,
+  oauthManager,
 });
 
 // ── Startup ────────────────────────────────────────────────────────────────────

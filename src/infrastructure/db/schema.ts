@@ -150,6 +150,27 @@ export const whatsappSessions = pgTable("whatsapp_sessions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const oauthTokens = pgTable(
+  "oauth_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().default("google"),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    refreshTokenEncrypted: text("refresh_token_encrypted").notNull(),
+    tokenExpiry: timestamp("token_expiry", { withTimezone: true }),
+    scopes: text("scopes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdIdx: index("oauth_tokens_user_id_idx").on(table.userId),
+    userProviderUq: uniqueIndex("oauth_tokens_user_provider_uq").on(table.userId, table.provider),
+  })
+);
+
 // Embedding dimension: 768 for Gemini gemini-embedding-001 (default)
 // 1536 for OpenAI text-embedding-3-small — set EMBEDDING_DIM env var to override
 const EMBEDDING_DIM = Number(process.env["EMBEDDING_DIM"] ?? 768);
@@ -194,6 +215,7 @@ export const documentChunks = pgTable(
 export const usersRelations = relations(users, ({ many, one }) => ({
   conversations: many(conversations),
   whatsappSession: one(whatsappSessions),
+  oauthTokens: many(oauthTokens),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -231,6 +253,13 @@ export const whatsappSessionsRelations = relations(whatsappSessions, ({ one }) =
   }),
 }));
 
+export const oauthTokensRelations = relations(oauthTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [oauthTokens.userId],
+    references: [users.id],
+  }),
+}));
+
 // ============================================================
 // Types
 // ============================================================
@@ -249,3 +278,5 @@ export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
 export type WhatsappSession = typeof whatsappSessions.$inferSelect;
 export type NewWhatsappSession = typeof whatsappSessions.$inferInsert;
+export type OAuthToken = typeof oauthTokens.$inferSelect;
+export type NewOAuthToken = typeof oauthTokens.$inferInsert;

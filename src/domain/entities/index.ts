@@ -174,3 +174,29 @@ export interface NewWhatsappSession {
   phone?: string | null | undefined;
   updatedAt?: Date | undefined;
 }
+
+// ── OAuth Token ────────────────────────────────────────────────────────────────
+
+export interface OAuthToken {
+  id: string;
+  userId: string;
+  provider: string;
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted: string;
+  tokenExpiry: Date | null;
+  scopes: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewOAuthToken {
+  id?: string | undefined;
+  userId: string;
+  provider?: string | undefined;
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted: string;
+  tokenExpiry?: Date | null | undefined;
+  scopes?: string | undefined;
+  createdAt?: Date | undefined;
+  updatedAt?: Date | undefined;
+}

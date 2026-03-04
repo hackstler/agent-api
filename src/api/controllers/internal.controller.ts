@@ -160,7 +160,7 @@ export function createInternalController(
       // before storage). The orgId leaks into conversation history — acceptable trade-off
       // since memory is already scoped by resource:orgId. persistMessages below uses
       // the clean messageBody for our own DB.
-      const enrichedBody = `${messageBody}\n[org:${orgId}]`;
+      const enrichedBody = `${messageBody}\n[org:${orgId}][userId:${userId}]`;
 
       const result = await agent.generate(enrichedBody, {
         memory: { thread: conversationId, resource: orgId },
