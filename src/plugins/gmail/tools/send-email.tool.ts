@@ -10,7 +10,7 @@ export function createSendEmailTool({ gmailService }: SendEmailDeps) {
   return createTool({
     id: "sendEmail",
     description:
-      "Send an email via the user's Gmail account. Requires the user's Google account to be connected.",
+      "Send an email via the user's Gmail account. Confirm details with the user before sending unless the query contains CONFIRMED. Requires the user's Google account to be connected.",
     inputSchema: z.object({
       userId: z
         .string()

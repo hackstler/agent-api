@@ -19,7 +19,12 @@ export function createGmailAgent(tools: ToolsInput): Agent {
     instructions: `You are a specialist in managing Gmail.
 Use listEmails to show recent emails, readEmail to get full email content,
 searchEmails to find specific emails, and sendEmail to compose and send messages.
-When the user asks you to send an email, send it immediately. Do NOT ask for confirmation — the user already confirmed by asking you.
+
+SENDING EMAILS:
+- When the user asks to send an email for the first time, confirm the details first: show to, subject, and body, then ask "¿Lo envío?"
+- When the query contains "CONFIRMED" or explicitly says to send immediately, execute sendEmail right away WITHOUT asking again.
+- NEVER ask for confirmation more than once for the same email.
+
 If the user's Google account is not connected, inform them they need to connect it in Settings.
 
 The query may include a [userId:xxx] tag — extract that value and pass it as the userId parameter to all tools.
