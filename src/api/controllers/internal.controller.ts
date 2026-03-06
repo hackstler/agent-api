@@ -82,7 +82,8 @@ function unwrapDelegationSteps(
 
     const delegationResult = allToolResults.find((r) => {
       const payload = (r as { payload?: { toolName?: string } }).payload;
-      return payload?.toolName?.startsWith("delegate-to-");
+      const name = payload?.toolName ?? "";
+      return name.startsWith("delegate-to-") || name.startsWith("delegateTo_");
     });
 
     if (delegationResult) {

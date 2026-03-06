@@ -55,7 +55,7 @@ export interface RagConfig {
 const defaultConfig: RagConfig = {
   agentName: process.env["AGENT_NAME"] ?? "Assistant",
   agentDescription: process.env["AGENT_DESCRIPTION"] ?? "A smart personal assistant that remembers everything you share — videos, notes, ideas, links — and helps you retrieve that information when you need it.",
-  responseLanguage: process.env["AGENT_LANGUAGE"] ?? "en",
+  responseLanguage: process.env["AGENT_LANGUAGE"] ?? "es",
   useCase: "custom",
 
   topK: Number(process.env["RAG_TOP_K"] ?? 10),
