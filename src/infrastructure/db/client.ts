@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { resolve } from "path";
+import { existsSync } from "fs";
 import * as schema from "./schema.js";
 
 const DATABASE_URL = process.env["DATABASE_URL"];
@@ -39,10 +40,22 @@ export async function ensurePgVector(): Promise<void> {
 }
 
 export async function runMigrations(): Promise<void> {
-  const base = process.env["NODE_ENV"] === "production"
-    ? "dist/infrastructure/db/migrations"
-    : "src/infrastructure/db/migrations";
-  const migrationsFolder = resolve(process.cwd(), base);
+  // Try multiple candidate paths — covers Docker, Nixpacks, and dev
+  const candidates = [
+    resolve(process.cwd(), "dist/infrastructure/db/migrations"),
+    resolve(process.cwd(), "src/infrastructure/db/migrations"),
+  ];
 
+  const migrationsFolder = candidates.find((p) =>
+    existsSync(resolve(p, "meta", "_journal.json"))
+  );
+
+  if (!migrationsFolder) {
+    console.warn("[migrations] no meta/_journal.json found, checked:", candidates.join(", "));
+    console.warn("[migrations] skipping drizzle migrate — schema must already exist in DB");
+    return;
+  }
+
+  console.log(`[migrations] using: ${migrationsFolder}`);
   await migrate(db, { migrationsFolder });
 }
