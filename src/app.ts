@@ -52,7 +52,7 @@ export function createApp(deps: AppDependencies): Hono {
     "*",
     cors({
       origin: process.env["ALLOWED_ORIGINS"]?.split(",") ?? "*",
-      allowMethods: ["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
     })
   );
