@@ -91,6 +91,8 @@ Returns a formatted summary and a PDF attachment.`,
         catalogService.getActiveCatalogId(orgId),
       ]);
 
+      console.log(`[calculateBudget] orgId=${orgId}, org found=${!!org}, name=${org?.name ?? "NULL"}, nif=${org?.nif ?? "NULL"}, vatRate=${org?.vatRate ?? "NULL"}`);
+
       if (!catalogId) {
         return {
           success: false,
