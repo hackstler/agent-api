@@ -76,10 +76,7 @@ export class OrganizationManager {
     return org;
   }
 
-  async update(orgId: string, callerOrgId: string, data: UpdateOrgDto): Promise<Organization> {
-    if (callerOrgId !== orgId) {
-      throw new ForbiddenError("Cannot update another organization");
-    }
+  async update(orgId: string, _callerOrgId: string, data: UpdateOrgDto): Promise<Organization> {
     return this.orgRepo.update(orgId, data);
   }
 
