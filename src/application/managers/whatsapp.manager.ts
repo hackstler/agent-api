@@ -1,5 +1,5 @@
 import type { WhatsappSession } from "../../domain/entities/index.js";
-import type { WhatsAppSessionRepository } from "../../domain/ports/repositories/whatsapp-session.repository.js";
+import type { WhatsAppSessionRepository, WhatsAppSessionWithUser } from "../../domain/ports/repositories/whatsapp-session.repository.js";
 import type { UserRepository } from "../../domain/ports/repositories/user.repository.js";
 import { NotFoundError, ConflictError } from "../../domain/errors/index.js";
 
@@ -64,6 +64,14 @@ export class WhatsAppManager {
 
   async listActiveSessions(): Promise<Pick<WhatsappSession, "userId" | "orgId">[]> {
     return this.sessionRepo.findAllActive();
+  }
+
+  async listAllSessions(): Promise<WhatsAppSessionWithUser[]> {
+    return this.sessionRepo.findAllWithUser();
+  }
+
+  async listSessionsByOrg(orgId: string): Promise<WhatsAppSessionWithUser[]> {
+    return this.sessionRepo.findAllWithUserByOrg(orgId);
   }
 
   async reportQr(userId: string, qrData: string): Promise<{ status: string; userId: string; orgId: string }> {

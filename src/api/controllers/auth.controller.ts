@@ -9,7 +9,7 @@ const registerValidator = z.object({
   username: z.string().min(3).max(50),
   password: z.string().min(8),
   orgId: z.string().optional(),
-  role: z.enum(["admin", "user"]).default("user"),
+  role: z.enum(["admin", "user", "super_admin"]).default("user"),
 });
 
 const passwordLoginValidator = z.object({

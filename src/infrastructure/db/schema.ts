@@ -56,7 +56,7 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").unique(),
   orgId: text("org_id").notNull(),
-  role: text("role").$type<"admin" | "user">().notNull().default("user"),
+  role: text("role").$type<"admin" | "user" | "super_admin">().notNull().default("user"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -9,7 +9,7 @@ export interface TokenPayload extends JwtPayload {
   userId: string;
   username: string;
   orgId: string;
-  role: "admin" | "user";
+  role: "admin" | "user" | "super_admin";
 }
 
 export interface WorkerTokenPayload extends JwtPayload {
@@ -119,16 +119,17 @@ export function optionalAuth(): MiddlewareHandler {
  * Use after authMiddleware() to restrict an endpoint to specific roles.
  * Example: app.post("/admin/users", authMiddleware(), requireRole("admin"), handler)
  */
-export function requireRole(...roles: Array<"admin" | "user">): MiddlewareHandler {
+export function requireRole(...roles: Array<"admin" | "user" | "super_admin">): MiddlewareHandler {
   return async (c: Context, next) => {
     const user = c.get("user");
     if (!user) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!roles.includes(user.role)) {
-      return c.json({ error: "Forbidden", message: `Requires role: ${roles.join(" or ")}` }, 403);
+    if (user.role === "super_admin" || roles.includes(user.role)) {
+      await next();
+      return;
     }
-    await next();
+    return c.json({ error: "Forbidden", message: `Requires role: ${roles.join(" or ")}` }, 403);
   };
 }
 

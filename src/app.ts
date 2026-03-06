@@ -96,10 +96,22 @@ export function createApp(deps: AppDependencies): Hono {
   app.use("/channels/*", auth);
   app.route("/channels", createChannelController(deps.waManager));
 
+  // Org info for current user (any authenticated user can see their own org)
+  app.get("/org/me", auth, async (c) => {
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "BadRequest", message: "Missing orgId" }, 400);
+    try {
+      const org = await deps.orgManager.getByOrgId(user.orgId);
+      return c.json({ data: org });
+    } catch {
+      return c.json({ data: null });
+    }
+  });
+
   // Admin endpoints — require admin role
   app.use("/admin/*", auth);
-  app.use("/admin/*", requireRole("admin"));
-  app.route("/admin", createAdminController(deps.userManager, deps.orgManager, deps.authConfig));
+  app.use("/admin/*", requireRole("admin", "super_admin"));
+  app.route("/admin", createAdminController(deps.userManager, deps.orgManager, deps.authConfig, deps.waManager));
   if (deps.catalogManager) {
     app.route("/admin/catalogs", createCatalogController(deps.catalogManager));
   }

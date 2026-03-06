@@ -17,7 +17,9 @@ export function createConversationController(manager: ConversationManager): Hono
 
   router.get("/", async (c) => {
     const filters = listConversationsValidator.parse(c.req.query());
-    const result = await manager.list(filters);
+    // Scope to current user — users can only see their own conversations
+    const user = c.get("user");
+    const result = await manager.list({ ...filters, userId: user?.userId });
     return c.json(result);
   });
 

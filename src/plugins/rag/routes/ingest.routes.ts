@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { loadDocument } from "../ingestion/loader.js";
 import { processDocument } from "../ingestion/processor.js";
 import { db } from "../../../infrastructure/db/client.js";
@@ -50,9 +50,13 @@ export function createIngestRoutes(): Hono {
    */
   ingest.get("/status/:id", async (c) => {
     const id = c.req.param("id");
+    const user = c.get("user");
+    const orgId = user?.orgId;
 
     const doc = await db.query.documents.findFirst({
-      where: eq(documents.id, id),
+      where: orgId
+        ? and(eq(documents.id, id), eq(documents.orgId, orgId))
+        : eq(documents.id, id),
       columns: {
         id: true,
         title: true,

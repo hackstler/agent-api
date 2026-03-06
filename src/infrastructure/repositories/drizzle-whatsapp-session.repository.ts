@@ -1,8 +1,8 @@
 import { eq, ne, and, lt, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { whatsappSessions } from "../db/schema.js";
+import { whatsappSessions, users } from "../db/schema.js";
 import type { WhatsappSession, NewWhatsappSession } from "../db/schema.js";
-import type { WhatsAppSessionRepository } from "../../domain/ports/repositories/whatsapp-session.repository.js";
+import type { WhatsAppSessionRepository, WhatsAppSessionWithUser } from "../../domain/ports/repositories/whatsapp-session.repository.js";
 
 export class DrizzleWhatsAppSessionRepository implements WhatsAppSessionRepository {
   async findByUserId(userId: string): Promise<WhatsappSession | null> {
@@ -30,6 +30,39 @@ export class DrizzleWhatsAppSessionRepository implements WhatsAppSessionReposito
       .select({ userId: whatsappSessions.userId, orgId: whatsappSessions.orgId })
       .from(whatsappSessions)
       .where(ne(whatsappSessions.status, "disconnected"));
+  }
+
+  async findAllWithUser(): Promise<WhatsAppSessionWithUser[]> {
+    const rows = await db
+      .select({
+        id: whatsappSessions.id,
+        orgId: whatsappSessions.orgId,
+        userId: whatsappSessions.userId,
+        status: whatsappSessions.status,
+        phone: whatsappSessions.phone,
+        updatedAt: whatsappSessions.updatedAt,
+        userEmail: users.email,
+      })
+      .from(whatsappSessions)
+      .innerJoin(users, eq(whatsappSessions.userId, users.id));
+    return rows;
+  }
+
+  async findAllWithUserByOrg(orgId: string): Promise<WhatsAppSessionWithUser[]> {
+    const rows = await db
+      .select({
+        id: whatsappSessions.id,
+        orgId: whatsappSessions.orgId,
+        userId: whatsappSessions.userId,
+        status: whatsappSessions.status,
+        phone: whatsappSessions.phone,
+        updatedAt: whatsappSessions.updatedAt,
+        userEmail: users.email,
+      })
+      .from(whatsappSessions)
+      .innerJoin(users, eq(whatsappSessions.userId, users.id))
+      .where(eq(whatsappSessions.orgId, orgId));
+    return rows;
   }
 
   async upsertByUserId(data: NewWhatsappSession): Promise<WhatsappSession> {

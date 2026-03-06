@@ -13,20 +13,20 @@ export interface RegisterUserDto {
   username: string;
   password: string;
   orgId?: string;
-  role?: "admin" | "user";
+  role?: "admin" | "user" | "super_admin";
 }
 
 export interface CreateUserDto {
   username: string;
   password: string;
   orgId: string;
-  role?: "admin" | "user";
+  role?: "admin" | "user" | "super_admin";
 }
 
 export interface InviteUserDto {
   email: string;
   orgId: string;
-  role?: "admin" | "user";
+  role?: "admin" | "user" | "super_admin";
 }
 
 export interface UserListItem {
@@ -50,18 +50,18 @@ export class UserManager {
   async register(
     dto: RegisterUserDto,
     callerRole?: string,
-  ): Promise<{ user: User; role: "admin" | "user" }> {
+  ): Promise<{ user: User; role: "admin" | "user" | "super_admin" }> {
     const userCount = await this.repo.count();
     const isFirstUser = userCount === 0;
 
-    if (!isFirstUser && callerRole !== "admin") {
+    if (!isFirstUser && callerRole !== "admin" && callerRole !== "super_admin") {
       throw new ForbiddenError("Only admins can create users");
     }
 
     const existing = await this.repo.findByEmail(dto.username);
     if (existing) throw new ConflictError("User", `email '${dto.username}'`);
 
-    const role = isFirstUser ? "admin" : (dto.role ?? "user");
+    const role = isFirstUser ? "super_admin" : (dto.role ?? "user");
     const user = await this.repo.create({
       email: dto.username,
       orgId: dto.orgId ?? dto.username,
@@ -75,7 +75,7 @@ export class UserManager {
   async login(
     username: string,
     password: string,
-  ): Promise<{ user: User; role: "admin" | "user" }> {
+  ): Promise<{ user: User; role: "admin" | "user" | "super_admin" }> {
     const user = await this.repo.findByEmail(username);
     if (!user) throw new UnauthorizedError("Invalid credentials");
 
@@ -135,7 +135,7 @@ export class UserManager {
 
   async findByEmailWithRole(
     email: string,
-  ): Promise<{ user: User; role: "admin" | "user" } | null> {
+  ): Promise<{ user: User; role: "admin" | "user" | "super_admin" } | null> {
     const user = await this.repo.findByEmail(email);
     if (!user) return null;
     return { user, role: user.role };
