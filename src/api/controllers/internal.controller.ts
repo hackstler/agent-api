@@ -34,12 +34,6 @@ const messageSchema = z.object({
 });
 
 /**
- * Regex to find quote PDF filenames in agent text responses.
- * Matches: PRES-YYYYMMDD-XXXX.pdf
- */
-const QUOTE_FILENAME_RE = /PRES-\d{8}-\d{1,6}\.pdf/;
-
-/**
  * Unwraps nested toolResults from delegation steps.
  */
 function unwrapDelegationSteps(
@@ -154,26 +148,17 @@ export function createInternalController(
 
       const waText = formatForWhatsApp(replyText) + buildSourcesFooter(sources);
 
-      // Deterministic PDF retrieval: extract filename from agent text, look up in store.
-      // The calculateBudget tool always stores the PDF keyed by filename (e.g. PRES-20260306-1234.pdf).
-      // The agent always includes the filename in its text response.
-      // This approach has ZERO dependency on Mastra's RequestContext or step propagation.
+      // PDF retrieval: the calculateBudget tool always stores the PDF in pdfStore.
+      // agent.generate() is awaited, so any PDF stored during that call is ours.
+      // takeLatest() is 100% deterministic — no regex, no RequestContext, no Mastra steps.
       let document: DocumentAttachment | null = null;
-      const filenameMatch = replyText.match(QUOTE_FILENAME_RE);
-      if (filenameMatch) {
-        const storeEntry = pdfStore.take(filenameMatch[0]);
-        if (storeEntry) {
-          document = {
-            base64: storeEntry.pdfBase64,
-            mimetype: "application/pdf",
-            filename: storeEntry.filename,
-          };
-        } else {
-          console.warn("[internal/message] PDF filename found in text but not in store:", filenameMatch[0]);
-        }
-      }
-
-      if (document) {
+      const storeEntry = pdfStore.takeLatest();
+      if (storeEntry) {
+        document = {
+          base64: storeEntry.pdfBase64,
+          mimetype: "application/pdf",
+          filename: storeEntry.filename,
+        };
         console.log("[internal/message] PDF attached:", document.filename);
       }
 
