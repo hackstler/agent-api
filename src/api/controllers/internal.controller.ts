@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import type { Agent } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
 import type { WhatsAppManager } from "../../application/managers/whatsapp.manager.js";
@@ -115,7 +116,8 @@ export function createInternalController(
         userId,
       );
 
-      const requestContext = new RequestContext([['userId', userId], ['orgId', orgId], ['conversationId', conversationId]]);
+      const pdfRequestId = randomUUID();
+      const requestContext = new RequestContext([['userId', userId], ['orgId', orgId], ['conversationId', conversationId], ['pdfRequestId', pdfRequestId]]);
 
       const result = await agent.generate(messageBody, {
         requestContext,
@@ -148,11 +150,11 @@ export function createInternalController(
 
       const waText = formatForWhatsApp(replyText) + buildSourcesFooter(sources);
 
-      // PDF retrieval: the calculateBudget tool always stores the PDF in pdfStore.
-      // agent.generate() is awaited, so any PDF stored during that call is ours.
-      // takeLatest() is 100% deterministic — no regex, no RequestContext, no Mastra steps.
+      // PDF retrieval: keyed by pdfRequestId (UUID) via RequestContext.
+      // Same propagation channel as orgId (proven to work through delegation).
+      // Deterministic and concurrent-safe — each request has its own UUID.
       let document: DocumentAttachment | null = null;
-      const storeEntry = pdfStore.takeLatest();
+      const storeEntry = pdfStore.take(pdfRequestId);
       if (storeEntry) {
         document = {
           base64: storeEntry.pdfBase64,
