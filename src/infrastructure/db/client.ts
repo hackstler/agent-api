@@ -58,16 +58,18 @@ export async function runMigrations(): Promise<void> {
 
   console.log(`[migrations] using: ${migrationsFolder}`);
 
-  // Clean up broken auto-generated migration that was deployed by mistake
+  // Clean up broken auto-generated migration (0006_petite_anthem) that was deployed by mistake.
+  // Its folderMillis was 1772905955669 — newer than the hand-written migrations,
+  // which blocks drizzle from running them. Remove it so pending migrations can apply.
   try {
     const client = await pool.connect();
     try {
-      await client.query(`DELETE FROM "__drizzle_migrations" WHERE hash LIKE '%petite_anthem%'`);
+      await client.query(`DELETE FROM "drizzle"."__drizzle_migrations" WHERE created_at = 1772905955669`);
     } finally {
       client.release();
     }
   } catch {
-    // Table might not exist yet on first run — ignore
+    // Table/schema might not exist yet on first run — ignore
   }
 
   await migrate(db, { migrationsFolder });

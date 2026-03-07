@@ -47,14 +47,14 @@
     {
       "idx": 6,
       "version": "7",
-      "when": 1772656700000,
+      "when": 1772910000000,
       "tag": "0010_add_invitations_table",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "7",
-      "when": 1772656800000,
+      "when": 1772920000000,
       "tag": "0011_add_user_name_surname",
       "breakpoints": true
     }
