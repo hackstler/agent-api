@@ -57,5 +57,18 @@ export async function runMigrations(): Promise<void> {
   }
 
   console.log(`[migrations] using: ${migrationsFolder}`);
+
+  // Clean up broken auto-generated migration that was deployed by mistake
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`DELETE FROM "__drizzle_migrations" WHERE hash LIKE '%petite_anthem%'`);
+    } finally {
+      client.release();
+    }
+  } catch {
+    // Table might not exist yet on first run — ignore
+  }
+
   await migrate(db, { migrationsFolder });
 }
