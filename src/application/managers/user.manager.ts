@@ -49,6 +49,7 @@ export interface UpdateUserDto {
   surname?: string | undefined;
   role?: "admin" | "user" | "super_admin" | undefined;
   password?: string | undefined;
+  orgId?: string | undefined;
 }
 
 export interface UserListItem {
@@ -209,6 +210,11 @@ export class UserManager {
       throw new Error("Only super_admin can assign super_admin role");
     }
 
+    // Only super_admin can reassign org
+    if (dto.orgId && scope !== "all") {
+      throw new ForbiddenError("Only super_admin can change a user's organization");
+    }
+
     // Email conflict check
     if (dto.email && dto.email !== existingUser.email) {
       const existing = await this.repo.findByEmail(dto.email);
@@ -226,6 +232,7 @@ export class UserManager {
     if (dto.name !== undefined) updateData["name"] = dto.name;
     if (dto.surname !== undefined) updateData["surname"] = dto.surname;
     if (dto.role) updateData["role"] = dto.role;
+    if (dto.orgId) updateData["orgId"] = dto.orgId;
     if (dto.password) {
       updateData["metadata"] = {
         ...(existingUser.metadata ?? {}),

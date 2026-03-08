@@ -62,6 +62,7 @@ const updateUserValidator = z.object({
   surname: z.string().max(100).optional(),
   role: z.enum(["admin", "user", "super_admin"]).optional(),
   password: z.string().min(8).optional(),
+  orgId: z.string().min(1).max(200).optional(),
 });
 
 const createInvitationValidator = z.object({
@@ -171,7 +172,7 @@ export function createAdminController(
       return c.json(updated);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed";
-      if (message === "Forbidden" || message === "Only super_admin can assign super_admin role" || message.includes("Password management")) {
+      if (message === "Forbidden" || message === "Only super_admin can assign super_admin role" || message.includes("Password management") || message.includes("Only super_admin can change")) {
         return c.json({ error: "Forbidden", message }, 403);
       }
       if (message === "User not found") {
