@@ -55,6 +55,13 @@ export class CatalogManager {
     return catalog;
   }
 
+  /** Look up catalog by ID only (no org scoping). Used by super_admin flows. */
+  async getCatalogById(catalogId: string): Promise<Catalog> {
+    const catalog = await this.repo.findById(catalogId);
+    if (!catalog) throw new NotFoundError("Catalog", catalogId);
+    return catalog;
+  }
+
   async createCatalog(orgId: string, dto: CreateCatalogDto): Promise<Catalog> {
     return this.repo.create({
       orgId,

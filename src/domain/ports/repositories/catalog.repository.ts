@@ -3,6 +3,7 @@ import type { Catalog, NewCatalog, CatalogItem, NewCatalogItem } from "../../ent
 export interface CatalogRepository {
   // Catalogs
   findAll(): Promise<Catalog[]>;
+  findById(id: string): Promise<Catalog | null>;
   findByOrgId(orgId: string): Promise<Catalog[]>;
   findByOrgAndId(orgId: string, id: string): Promise<Catalog | null>;
   create(data: NewCatalog): Promise<Catalog>;

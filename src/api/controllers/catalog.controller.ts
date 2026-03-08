@@ -40,6 +40,22 @@ const updateItemValidator = z.object({
 export function createCatalogController(manager: CatalogManager, orgRepo?: OrganizationRepository): Hono {
   const router = new Hono();
 
+  /**
+   * For super_admin: resolve the catalog's actual orgId by looking it up by ID.
+   * For regular users: return their own orgId from the token.
+   * This allows super_admin to operate on catalogs from any org.
+   */
+  async function resolveOrgId(
+    user: { orgId: string; role: string },
+    catalogId: string,
+  ): Promise<string> {
+    if (user.role === "super_admin") {
+      const catalog = await manager.getCatalogById(catalogId);
+      return catalog.orgId;
+    }
+    return user.orgId;
+  }
+
   // ── Catalogs ──────────────────────────────────────────────────────────────
 
   router.get("/", async (c) => {
@@ -88,16 +104,17 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
   });
 
   router.get("/:catalogId", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
     const catalogId = c.req.param("catalogId");
+    const orgId = await resolveOrgId(user, catalogId);
     const catalog = await manager.getCatalog(orgId, catalogId);
     return c.json(catalog);
   });
 
   router.patch("/:catalogId", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
 
     const catalogId = c.req.param("catalogId");
     const body = await c.req.json().catch(() => null);
@@ -110,22 +127,25 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
     if (parsed.data.isActive !== undefined) dto["isActive"] = parsed.data.isActive;
     if (Object.keys(dto).length === 0) return c.json({ error: "Validation", message: "No fields to update" }, 400);
 
+    const orgId = await resolveOrgId(user, catalogId);
     const updated = await manager.updateCatalog(orgId, catalogId, dto as Parameters<typeof manager.updateCatalog>[2]);
     return c.json(updated);
   });
 
   router.delete("/:catalogId", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
     const catalogId = c.req.param("catalogId");
+    const orgId = await resolveOrgId(user, catalogId);
     await manager.deleteCatalog(orgId, catalogId);
     return c.json({ id: catalogId });
   });
 
   router.post("/:catalogId/activate", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
     const catalogId = c.req.param("catalogId");
+    const orgId = await resolveOrgId(user, catalogId);
     const catalog = await manager.activateCatalog(orgId, catalogId);
     return c.json(catalog);
   });
@@ -133,22 +153,24 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
   // ── Items ─────────────────────────────────────────────────────────────────
 
   router.get("/:catalogId/items", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
     const catalogId = c.req.param("catalogId");
+    const orgId = await resolveOrgId(user, catalogId);
     const rows = await manager.listItems(orgId, catalogId);
     return c.json({ items: rows, total: rows.length });
   });
 
   router.post("/:catalogId/items", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
 
     const catalogId = c.req.param("catalogId");
     const body = await c.req.json().catch(() => null);
     const parsed = createItemValidator.safeParse(body);
     if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
 
+    const orgId = await resolveOrgId(user, catalogId);
     const item = await manager.createItem(orgId, catalogId, {
       ...parsed.data,
       pricePerUnit: String(parsed.data.pricePerUnit),
@@ -157,8 +179,8 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
   });
 
   router.patch("/:catalogId/items/:itemId", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
 
     const catalogId = c.req.param("catalogId");
     const itemId = c.req.param("itemId");
@@ -177,15 +199,17 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
     if (parsed.data.isActive !== undefined) dto["isActive"] = parsed.data.isActive;
     if (Object.keys(dto).length === 0) return c.json({ error: "Validation", message: "No fields to update" }, 400);
 
+    const orgId = await resolveOrgId(user, catalogId);
     const updated = await manager.updateItem(orgId, catalogId, itemId, dto as Parameters<typeof manager.updateItem>[3]);
     return c.json(updated);
   });
 
   router.delete("/:catalogId/items/:itemId", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
     const catalogId = c.req.param("catalogId");
     const itemId = c.req.param("itemId");
+    const orgId = await resolveOrgId(user, catalogId);
     await manager.deleteItem(orgId, catalogId, itemId);
     return c.json({ id: itemId });
   });

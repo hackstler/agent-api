@@ -15,6 +15,13 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       .orderBy(desc(catalogs.createdAt));
   }
 
+  async findById(id: string): Promise<Catalog | null> {
+    const result = await db.query.catalogs.findFirst({
+      where: eq(catalogs.id, id),
+    });
+    return result ?? null;
+  }
+
   async findByOrgId(orgId: string): Promise<Catalog[]> {
     return db
       .select()
