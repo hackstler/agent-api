@@ -19,6 +19,7 @@ import type { AuthStrategy } from "./domain/ports/auth-strategy.js";
 import type { OAuthManager } from "./application/managers/oauth.manager.js";
 import type { CatalogManager } from "./application/managers/catalog.manager.js";
 import type { InvitationManager } from "./application/managers/invitation.manager.js";
+import type { QuoteRepository } from "./domain/ports/repositories/quote.repository.js";
 
 import { createAuthController } from "./api/controllers/auth.controller.js";
 import { createDocumentController } from "./api/controllers/document.controller.js";
@@ -29,6 +30,7 @@ import { createAdminController } from "./api/controllers/admin.controller.js";
 import { createTopicController } from "./api/controllers/topic.controller.js";
 import { createOAuthController } from "./api/controllers/oauth.controller.js";
 import { createCatalogController } from "./api/controllers/catalog.controller.js";
+import { createQuoteController } from "./api/controllers/quote.controller.js";
 import health from "./api/health.js";
 
 export interface AppDependencies {
@@ -45,6 +47,7 @@ export interface AppDependencies {
   oauthManager?: OAuthManager;
   catalogManager?: CatalogManager;
   invitationManager?: InvitationManager;
+  quoteRepo?: QuoteRepository;
 }
 
 export function createApp(deps: AppDependencies): Hono {
@@ -125,6 +128,12 @@ export function createApp(deps: AppDependencies): Hono {
   if (deps.catalogManager) {
     app.use("/admin/catalogs/*", requirePermission("manage_catalogs"));
     app.route("/admin/catalogs", createCatalogController(deps.catalogManager));
+  }
+
+  // Quotes — authenticated user
+  if (deps.quoteRepo) {
+    app.use("/quotes/*", auth);
+    app.route("/quotes", createQuoteController(deps.quoteRepo));
   }
 
   // Internal worker endpoints — worker JWT auth

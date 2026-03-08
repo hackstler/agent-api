@@ -2,6 +2,7 @@ import type { Plugin } from "../plugin.interface.js";
 import type { ToolsInput } from "@mastra/core/agent";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import type { OrganizationRepository } from "../../domain/ports/repositories/organization.repository.js";
+import type { QuoteRepository } from "../../domain/ports/repositories/quote.repository.js";
 import { CatalogService } from "./services/catalog.service.js";
 import { PdfService } from "./services/pdf.service.js";
 import { createCalculateBudgetTool } from "./tools/calculate-budget.tool.js";
@@ -10,6 +11,7 @@ import { createQuoteAgent } from "./quote.agent.js";
 export interface QuotePluginDeps {
   attachmentStore: AttachmentStore;
   organizationRepo: OrganizationRepository;
+  quoteRepo: QuoteRepository;
 }
 
 export class QuotePlugin implements Plugin {
@@ -19,10 +21,10 @@ export class QuotePlugin implements Plugin {
   readonly agent;
   readonly tools: ToolsInput;
 
-  constructor({ attachmentStore, organizationRepo }: QuotePluginDeps) {
+  constructor({ attachmentStore, organizationRepo, quoteRepo }: QuotePluginDeps) {
     const catalogService = new CatalogService();
     const pdfService = new PdfService();
-    const calculateBudget = createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo });
+    const calculateBudget = createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo, quoteRepo });
 
     this.tools = { calculateBudget };
     this.agent = createQuoteAgent(this.tools);

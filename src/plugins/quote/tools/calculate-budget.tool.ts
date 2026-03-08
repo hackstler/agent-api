@@ -4,6 +4,7 @@ import type { CatalogService } from "../services/catalog.service.js";
 import type { PdfService, QuoteLineItem, CompanyDetails } from "../services/pdf.service.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
 import type { OrganizationRepository } from "../../../domain/ports/repositories/organization.repository.js";
+import type { QuoteRepository } from "../../../domain/ports/repositories/quote.repository.js";
 import { quoteConfig } from "../config/quote.config.js";
 import { pdfStore } from "../services/pdf-store.js";
 
@@ -12,6 +13,7 @@ export interface CalculateBudgetDeps {
   pdfService: PdfService;
   attachmentStore: AttachmentStore;
   organizationRepo: OrganizationRepository;
+  quoteRepo: QuoteRepository;
 }
 
 /** Build CompanyDetails from org record, falling back to quoteConfig defaults. */
@@ -30,7 +32,7 @@ function resolveCompanyDetails(
   };
 }
 
-export function createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo }: CalculateBudgetDeps) {
+export function createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo, quoteRepo }: CalculateBudgetDeps) {
   return createTool({
     id: "calculateBudget",
     description: `Calculate a price quote for artificial grass installation and generate a PDF.
@@ -64,7 +66,7 @@ Returns a formatted summary and a PDF attachment.`,
       subtotal: z.number(),
       vatAmount: z.number(),
       total: z.number(),
-      pdfBase64: z.string(),
+      pdfGenerated: z.boolean(),
       filename: z.string(),
       notFound: z.array(z.string()),
     }),
@@ -79,7 +81,7 @@ Returns a formatted summary and a PDF attachment.`,
           subtotal: 0,
           vatAmount: 0,
           total: 0,
-          pdfBase64: "",
+          pdfGenerated: false,
           filename: "",
           notFound: ["Missing orgId in request context"],
         };
@@ -99,7 +101,7 @@ Returns a formatted summary and a PDF attachment.`,
           subtotal: 0,
           vatAmount: 0,
           total: 0,
-          pdfBase64: "",
+          pdfGenerated: false,
           filename: "",
           notFound: ["No active catalog found for this organization"],
         };
@@ -158,6 +160,28 @@ Returns a formatted summary and a PDF attachment.`,
         attachmentStore.store(filename, { base64: pdfBase64, mimetype: "application/pdf", filename });
       }
 
+      // Persist quote to DB for history/listing
+      const userId = context?.requestContext?.get("userId") as string | undefined;
+      if (userId && orgId) {
+        try {
+          await quoteRepo.create({
+            orgId,
+            userId,
+            quoteNumber,
+            clientName,
+            clientAddress,
+            lineItems: resolvedItems,
+            subtotal: String(subtotal),
+            vatAmount: String(vatAmount),
+            total: String(total),
+            pdfBase64: pdfBase64 ?? null,
+            filename,
+          });
+        } catch (err) {
+          console.error("[quote] failed to persist quote:", err instanceof Error ? err.message : err);
+        }
+      }
+
       return {
         success: true,
         clientName,
@@ -165,7 +189,7 @@ Returns a formatted summary and a PDF attachment.`,
         subtotal,
         vatAmount,
         total,
-        pdfBase64,
+        pdfGenerated: !!pdfBase64,
         filename,
         notFound,
       };

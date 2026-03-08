@@ -249,6 +249,31 @@ export const invitations = pgTable(
   })
 );
 
+// ── Quote line item JSON type (stored in quotes.lineItems JSONB) ──────────────
+export interface QuoteLineItemJson {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export const quotes = pgTable("quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: text("org_id").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  quoteNumber: text("quote_number").notNull(),
+  clientName: text("client_name").notNull(),
+  clientAddress: text("client_address"),
+  lineItems: jsonb("line_items").notNull().$type<QuoteLineItemJson[]>(),
+  subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
+  vatAmount: numeric("vat_amount", { precision: 10, scale: 2 }).notNull(),
+  total: numeric("total", { precision: 10, scale: 2 }).notNull(),
+  pdfBase64: text("pdf_base64"),
+  filename: text("filename").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Embedding dimension: 768 for Gemini gemini-embedding-001 (default)
 // 1536 for OpenAI text-embedding-3-small — set EMBEDDING_DIM env var to override
 const EMBEDDING_DIM = Number(process.env["EMBEDDING_DIM"] ?? 768);
@@ -343,6 +368,10 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   usedByUser: one(users, { fields: [invitations.usedBy], references: [users.id], relationName: "invitationUsedBy" }),
 }));
 
+export const quotesRelations = relations(quotes, ({ one }) => ({
+  user: one(users, { fields: [quotes.userId], references: [users.id] }),
+}));
+
 export const catalogsRelations = relations(catalogs, ({ many }) => ({
   items: many(catalogItems),
 }));
@@ -382,3 +411,5 @@ export type CatalogItem = typeof catalogItems.$inferSelect;
 export type NewCatalogItem = typeof catalogItems.$inferInsert;
 export type InvitationRow = typeof invitations.$inferSelect;
 export type NewInvitationRow = typeof invitations.$inferInsert;
+export type QuoteRow = typeof quotes.$inferSelect;
+export type NewQuoteRow = typeof quotes.$inferInsert;

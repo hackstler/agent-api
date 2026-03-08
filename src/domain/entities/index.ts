@@ -274,6 +274,48 @@ export interface NewInvitation {
   expiresAt: Date;
 }
 
+// ── Quote ────────────────────────────────────────────────────────────────────
+
+export interface QuoteLineItem {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export interface Quote {
+  id: string;
+  orgId: string;
+  userId: string;
+  quoteNumber: string;
+  clientName: string;
+  clientAddress: string | null;
+  lineItems: QuoteLineItem[];
+  subtotal: string;
+  vatAmount: string;
+  total: string;
+  pdfBase64: string | null;
+  filename: string;
+  createdAt: Date;
+}
+
+export interface NewQuote {
+  id?: string | undefined;
+  orgId: string;
+  userId: string;
+  quoteNumber: string;
+  clientName: string;
+  clientAddress?: string | null | undefined;
+  lineItems: QuoteLineItem[];
+  subtotal: string;
+  vatAmount: string;
+  total: string;
+  pdfBase64?: string | null | undefined;
+  filename: string;
+  createdAt?: Date | undefined;
+}
+
 // ── Catalog ─────────────────────────────────────────────────────────────────
 
 export interface Catalog {

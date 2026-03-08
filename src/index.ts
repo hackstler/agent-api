@@ -12,6 +12,7 @@ import { DrizzleOAuthTokenRepository } from "./infrastructure/repositories/drizz
 import { DrizzleOrganizationRepository } from "./infrastructure/repositories/drizzle-organization.repository.js";
 import { DrizzleCatalogRepository } from "./infrastructure/repositories/drizzle-catalog.repository.js";
 import { DrizzleInvitationRepository } from "./infrastructure/repositories/drizzle-invitation.repository.js";
+import { DrizzleQuoteRepository } from "./infrastructure/repositories/drizzle-quote.repository.js";
 
 // Application — managers
 import { UserManager } from "./application/managers/user.manager.js";
@@ -63,6 +64,7 @@ const oauthTokenRepo = new DrizzleOAuthTokenRepository();
 const orgRepo = new DrizzleOrganizationRepository();
 const catalogRepo = new DrizzleCatalogRepository();
 const invitationRepo = new DrizzleInvitationRepository();
+const quoteRepo = new DrizzleQuoteRepository();
 
 // 2. Auth strategy (firebase or password — always non-null)
 const authStrategy = createAuthStrategy(authConfig, PASSWORD_SALT, userRepo);
@@ -89,7 +91,7 @@ const oauthProvider = new OAuthManagerAdapter(oauthManager);
 const attachmentStore = new InMemoryAttachmentStore();
 pluginRegistry.register(new GmailPlugin(oauthProvider, attachmentStore));
 pluginRegistry.register(new CalendarPlugin(oauthProvider));
-pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo }));
+pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo, quoteRepo }));
 
 // 5. Coordinator agent (uses all plugin tools)
 const coordinatorAgent = createCoordinatorAgent(pluginRegistry);
@@ -113,6 +115,7 @@ const app = createApp({
   oauthManager,
   catalogManager,
   invitationManager,
+  quoteRepo,
 });
 
 // ── Startup ────────────────────────────────────────────────────────────────────
