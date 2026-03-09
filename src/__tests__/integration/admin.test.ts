@@ -152,8 +152,7 @@ describe("Admin API", () => {
       headers: superAdminHeaders,
       body: JSON.stringify({
         orgId: "new-org",
-        adminUsername: "orgadmin",
-        adminPassword: "password123",
+        adminEmail: "orgadmin@test.com",
       }),
     });
 
@@ -166,8 +165,7 @@ describe("Admin API", () => {
       headers: orgAdminHeaders,
       body: JSON.stringify({
         orgId: "new-org",
-        adminUsername: "orgadmin",
-        adminPassword: "password123",
+        adminEmail: "orgadmin@test.com",
       }),
     });
 
@@ -182,8 +180,7 @@ describe("Admin API", () => {
       headers: superAdminHeaders,
       body: JSON.stringify({
         orgId: "org-1",
-        adminUsername: "admin2",
-        adminPassword: "password123",
+        adminEmail: "admin2@test.com",
       }),
     });
 

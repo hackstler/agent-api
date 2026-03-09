@@ -30,8 +30,8 @@ const inviteUserValidator = z.object({
 
 const createOrgValidator = z.object({
   orgId: z.string().min(1).max(100),
-  adminUsername: z.string().min(3).max(50),
-  adminPassword: z.string().min(8),
+  adminEmail: z.string().email().max(255),
+  adminPassword: z.string().min(8).optional(),
   slug: z.string().regex(/^[a-z0-9-]+$/).min(2).max(50).optional(),
   name: z.string().max(200).optional(),
   address: z.string().max(500).optional(),

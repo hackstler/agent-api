@@ -18,8 +18,8 @@ export interface OrgSummary {
 
 export interface CreateOrgDto {
   orgId: string;
-  adminUsername: string;
-  adminPassword: string;
+  adminEmail: string;
+  adminPassword?: string | undefined;
   slug?: string | null | undefined;
   name?: string | null | undefined;
   address?: string | null | undefined;
@@ -94,8 +94,8 @@ export class OrganizationManager {
     const existingOrg = await this.userRepo.findFirstByOrg(dto.orgId);
     if (existingOrg) throw new ConflictError("Organization", `orgId '${dto.orgId}'`);
 
-    const existingUser = await this.userRepo.findByEmail(dto.adminUsername);
-    if (existingUser) throw new ConflictError("User", `email '${dto.adminUsername}'`);
+    const existingUser = await this.userRepo.findByEmail(dto.adminEmail);
+    if (existingUser) throw new ConflictError("User", `email '${dto.adminEmail}'`);
 
     // Create the organizations row
     await this.orgRepo.create({
@@ -112,11 +112,20 @@ export class OrganizationManager {
       features: dto.features,
     });
 
+    // Build admin metadata — include password hash only if provided and strategy supports it
+    const metadata: Record<string, unknown> = {};
+    if (dto.adminPassword && this.strategy.hashPassword) {
+      metadata["passwordHash"] = this.strategy.hashPassword(dto.adminPassword);
+    }
+    if (!dto.adminPassword) {
+      metadata["authStrategy"] = "firebase";
+    }
+
     const admin = await this.userRepo.create({
-      email: dto.adminUsername,
+      email: dto.adminEmail,
       orgId: dto.orgId,
       role: "admin",
-      metadata: { passwordHash: this.strategy.hashPassword!(dto.adminPassword) },
+      metadata,
     });
 
     return {
