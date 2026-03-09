@@ -82,8 +82,9 @@ export async function processDocument(
   const documentId = doc!.id;
 
   try {
-    // 5. Choose chunking strategy — YouTube uses hierarchical to respect sections
-    const chunkerOpts: ChunkerOptions = loaded.metadata.contentType === "youtube"
+    // 5. Choose chunking strategy — YouTube and entity use hierarchical to respect sections
+    const useHierarchical = loaded.metadata.contentType === "youtube" || loaded.metadata.contentType === "entity";
+    const chunkerOpts: ChunkerOptions = useHierarchical
       ? { strategy: "hierarchical", chunkSize: ragConfig.chunkSize, chunkOverlap: ragConfig.chunkOverlap }
       : { strategy: ragConfig.chunkingStrategy, chunkSize: ragConfig.chunkSize, chunkOverlap: ragConfig.chunkOverlap };
 

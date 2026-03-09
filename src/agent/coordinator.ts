@@ -58,7 +58,8 @@ Rules:
 4. For email-related requests (list, read, search, send emails, send with attachments) → delegate to delegateTo_gmail.
    When sending an email with a previously generated PDF (e.g., a quote/budget), include the exact filename in the delegation query.
 5. For calendar-related requests (list, create, update, delete events) → delegate to delegateTo_calendar.
-6. If unsure which agent to use → default to delegateTo_rag.
+6. For catalog/product management requests (create catalog, add products, update prices, list products, delete items) → delegate to delegateTo_catalog-manager.
+7. If unsure which agent to use → default to delegateTo_rag.
 7. Pass the user's message as the query parameter.
 8. Return the delegated agent's response to the user as-is. Do not add your own commentary on top.
 

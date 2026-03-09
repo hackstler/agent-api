@@ -32,6 +32,7 @@ import { YouTubePlugin } from "./plugins/youtube/index.js";
 import { GmailPlugin } from "./plugins/gmail/index.js";
 import { CalendarPlugin } from "./plugins/calendar/index.js";
 import { QuotePlugin } from "./plugins/quote/index.js";
+import { CatalogManagerPlugin } from "./plugins/catalog-manager/index.js";
 import { seedCatalog } from "./infrastructure/db/catalog-seed.js";
 import { OAuthManagerAdapter } from "./plugins/google-common/oauth-manager-adapter.js";
 
@@ -92,6 +93,7 @@ const attachmentStore = new InMemoryAttachmentStore();
 pluginRegistry.register(new GmailPlugin(oauthProvider, attachmentStore));
 pluginRegistry.register(new CalendarPlugin(oauthProvider));
 pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo, quoteRepo }));
+pluginRegistry.register(new CatalogManagerPlugin({ catalogManager, catalogRepo }));
 
 // 5. Coordinator agent (uses all plugin tools)
 const coordinatorAgent = createCoordinatorAgent(pluginRegistry);

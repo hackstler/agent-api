@@ -1,6 +1,7 @@
 import type { Catalog, CatalogItem } from "../../domain/entities/index.js";
 import type { CatalogRepository } from "../../domain/ports/repositories/catalog.repository.js";
 import { NotFoundError } from "../../domain/errors/index.js";
+import { entityEvents, type EntityEventType } from "../events/entity-events.js";
 
 export interface CreateCatalogDto {
   name: string;
@@ -39,6 +40,15 @@ export interface UpdateItemDto {
 export class CatalogManager {
   constructor(private readonly repo: CatalogRepository) {}
 
+  private emitEvent(type: EntityEventType, orgId: string, entityId: string, relatedId?: string): void {
+    try {
+      const event = { type, orgId, entityId, timestamp: new Date(), ...(relatedId != null && { relatedId }) };
+      entityEvents.emit("entity", event);
+    } catch {
+      // fire-and-forget: listener errors must not break CRUD
+    }
+  }
+
   // ── Catalogs ──────────────────────────────────────────────────────────────
 
   async listCatalogs(orgId: string): Promise<Catalog[]> {
@@ -63,12 +73,14 @@ export class CatalogManager {
   }
 
   async createCatalog(orgId: string, dto: CreateCatalogDto): Promise<Catalog> {
-    return this.repo.create({
+    const catalog = await this.repo.create({
       orgId,
       name: dto.name,
       effectiveDate: dto.effectiveDate,
       isActive: dto.isActive,
     });
+    this.emitEvent("catalog:created", orgId, catalog.id);
+    return catalog;
   }
 
   async updateCatalog(orgId: string, catalogId: string, dto: UpdateCatalogDto): Promise<Catalog> {
@@ -83,12 +95,14 @@ export class CatalogManager {
       data as Parameters<typeof this.repo.update>[2],
     );
     if (!updated) throw new NotFoundError("Catalog", catalogId);
+    this.emitEvent("catalog:updated", orgId, catalogId);
     return updated;
   }
 
   async deleteCatalog(orgId: string, catalogId: string): Promise<void> {
     const deleted = await this.repo.delete(catalogId, orgId);
     if (!deleted) throw new NotFoundError("Catalog", catalogId);
+    this.emitEvent("catalog:deleted", orgId, catalogId);
   }
 
   async activateCatalog(orgId: string, catalogId: string): Promise<Catalog> {
@@ -105,6 +119,7 @@ export class CatalogManager {
 
     // Activate the target
     const activated = await this.repo.update(catalog.id, orgId, { isActive: true });
+    this.emitEvent("catalog:activated", orgId, catalogId);
     return activated!;
   }
 
@@ -120,7 +135,7 @@ export class CatalogManager {
 
     const code = dto.code ?? (await this.repo.nextCode(catalogId));
 
-    return this.repo.createItem({
+    const item = await this.repo.createItem({
       catalogId,
       code,
       name: dto.name,
@@ -131,6 +146,8 @@ export class CatalogManager {
       sortOrder: dto.sortOrder,
       isActive: dto.isActive,
     });
+    this.emitEvent("catalog:item:created", orgId, item.id, catalogId);
+    return item;
   }
 
   async updateItem(
@@ -156,6 +173,7 @@ export class CatalogManager {
       data as Parameters<typeof this.repo.updateItem>[1],
     );
     if (!updated) throw new NotFoundError("CatalogItem", itemId);
+    this.emitEvent("catalog:item:updated", orgId, itemId, catalogId);
     return updated;
   }
 
@@ -163,5 +181,6 @@ export class CatalogManager {
     await this.getCatalog(orgId, catalogId); // verify ownership
     const deleted = await this.repo.deleteItem(itemId);
     if (!deleted) throw new NotFoundError("CatalogItem", itemId);
+    this.emitEvent("catalog:item:deleted", orgId, itemId, catalogId);
   }
 }

@@ -119,9 +119,7 @@ Returns a formatted summary and a PDF attachment.`,
           continue;
         }
         resolvedItems.push({
-          description: catalogItem.description
-            ? `${catalogItem.name} — ${catalogItem.description}`
-            : catalogItem.name,
+          description: catalogItem.name,
           quantity: item.quantity,
           unit: catalogItem.unit,
           unitPrice: catalogItem.pricePerUnit,

@@ -95,7 +95,7 @@ export interface NewTopic {
 
 // ── Document ────────────────────────────────────────────────────────────────────
 
-export type ContentType = "pdf" | "markdown" | "html" | "code" | "text" | "url" | "youtube";
+export type ContentType = "pdf" | "markdown" | "html" | "code" | "text" | "url" | "youtube" | "entity";
 export type DocumentStatus = "pending" | "processing" | "indexed" | "failed";
 
 export interface DocumentMetadata {

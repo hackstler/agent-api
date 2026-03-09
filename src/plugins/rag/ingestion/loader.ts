@@ -7,7 +7,7 @@ export interface LoadedDocument {
   metadata: {
     title: string;
     source: string;
-    contentType: "pdf" | "markdown" | "html" | "code" | "text" | "url" | "youtube";
+    contentType: "pdf" | "markdown" | "html" | "code" | "text" | "url" | "youtube" | "entity";
     size: number;
     pageCount?: number;
   };

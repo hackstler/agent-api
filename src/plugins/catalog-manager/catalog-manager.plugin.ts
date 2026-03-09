@@ -1,0 +1,89 @@
+import type { Plugin } from "../plugin.interface.js";
+import type { ToolsInput } from "@mastra/core/agent";
+import type { CatalogManager } from "../../application/managers/catalog.manager.js";
+import type { CatalogRepository } from "../../domain/ports/repositories/catalog.repository.js";
+import { entityEvents, type EntityEvent } from "../../application/events/entity-events.js";
+import { CatalogIndexer } from "./services/catalog-indexer.js";
+import { createCatalogCrudTools } from "./tools/index.js";
+import { createCatalogManagerAgent } from "./catalog-manager.agent.js";
+
+export interface CatalogManagerPluginDeps {
+  catalogManager: CatalogManager;
+  catalogRepo: CatalogRepository;
+}
+
+export class CatalogManagerPlugin implements Plugin {
+  readonly id = "catalog-manager";
+  readonly name = "Catalog Manager Plugin";
+  readonly description =
+    "Catalog/product management: create catalogs, add/update/delete products and prices, list products.";
+  readonly agent;
+  readonly tools: ToolsInput;
+
+  private readonly catalogIndexer: CatalogIndexer;
+  private readonly debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private listener: ((event: EntityEvent) => void) | null = null;
+
+  constructor({ catalogManager, catalogRepo }: CatalogManagerPluginDeps) {
+    this.catalogIndexer = new CatalogIndexer(catalogRepo);
+    this.tools = createCatalogCrudTools(catalogManager);
+    this.agent = createCatalogManagerAgent(this.tools);
+  }
+
+  async initialize(): Promise<void> {
+    // Subscribe to entity events for auto re-indexing
+    this.listener = (event: EntityEvent) => {
+      if (!event.type.startsWith("catalog:")) return;
+
+      // Determine which catalog changed
+      const catalogId = event.type.startsWith("catalog:item:")
+        ? event.relatedId!
+        : event.entityId;
+      const orgId = event.orgId;
+
+      // Debounce: collapse rapid mutations into a single re-index
+      const key = catalogId;
+      const existing = this.debounceTimers.get(key);
+      if (existing) clearTimeout(existing);
+
+      this.debounceTimers.set(
+        key,
+        setTimeout(() => {
+          this.debounceTimers.delete(key);
+
+          if (event.type === "catalog:deleted") {
+            this.catalogIndexer.remove(catalogId).catch((err) => {
+              console.error(`[catalog-manager] failed to remove index for ${catalogId}:`, err);
+            });
+          } else {
+            this.catalogIndexer.index(orgId, catalogId).catch((err) => {
+              console.error(`[catalog-manager] failed to re-index catalog ${catalogId}:`, err);
+            });
+          }
+        }, 2000)
+      );
+    };
+
+    entityEvents.on("entity", this.listener);
+
+    // Index all existing catalogs on startup
+    console.log("[catalog-manager] indexing existing catalogs...");
+    try {
+      const { indexed, failed } = await this.catalogIndexer.indexAllOrgs();
+      console.log(`[catalog-manager] startup indexing complete: ${indexed} indexed, ${failed} failed`);
+    } catch (err) {
+      console.error("[catalog-manager] startup indexing error (non-fatal):", err);
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.listener) {
+      entityEvents.off("entity", this.listener);
+      this.listener = null;
+    }
+    for (const timer of this.debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
+  }
+}
