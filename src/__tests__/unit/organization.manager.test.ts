@@ -106,8 +106,7 @@ describe("OrganizationManager", () => {
   describe("create(dto)", () => {
     const dto = {
       orgId: "org-new",
-      adminUsername: "admin@new.com",
-      adminPassword: "secret123",
+      adminEmail: "admin@new.com",
     };
 
     it("creates the org admin and organization row, returns result on success", async () => {

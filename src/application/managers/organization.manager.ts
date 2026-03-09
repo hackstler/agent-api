@@ -18,8 +18,8 @@ export interface OrgSummary {
 
 export interface CreateOrgDto {
   orgId: string;
-  adminUsername: string;
-  adminPassword: string;
+  adminEmail: string;
+  adminPassword?: string | undefined;
   slug?: string | null | undefined;
   name?: string | null | undefined;
   address?: string | null | undefined;
@@ -58,26 +58,39 @@ export class OrganizationManager {
   ) {}
 
   async list(): Promise<OrgSummary[]> {
-    const userCounts = await this.userRepo.countByOrg();
-    const docCounts = await this.docRepo.countByOrg();
+    const [allOrgs, userCounts, docCounts] = await Promise.all([
+      this.orgRepo.findAll(),
+      this.userRepo.countByOrg(),
+      this.docRepo.countByOrg(),
+    ]);
 
+    const userCountMap = new Map(userCounts.map((u) => [u.orgId, u]));
     const docCountMap = new Map(docCounts.map((d) => [d.orgId, d.docCount]));
 
-    // Fetch org details for names
-    const orgDetails = await Promise.all(
-      userCounts.map((row) => this.orgRepo.findByOrgId(row.orgId))
-    );
-    const orgNameMap = new Map(
-      orgDetails.filter(Boolean).map((o) => [o!.orgId, o!.name])
-    );
-
-    return userCounts.map((row) => ({
-      orgId: row.orgId,
-      name: orgNameMap.get(row.orgId) ?? null,
-      userCount: row.userCount,
-      docCount: docCountMap.get(row.orgId) ?? 0,
-      createdAt: row.earliestCreatedAt ? row.earliestCreatedAt.toISOString() : null,
+    // Use organizations table as source of truth, enriched with counts
+    const orgSet = new Set(allOrgs.map((o) => o.orgId));
+    const result: OrgSummary[] = allOrgs.map((org) => ({
+      orgId: org.orgId,
+      name: org.name ?? null,
+      userCount: userCountMap.get(org.orgId)?.userCount ?? 0,
+      docCount: docCountMap.get(org.orgId) ?? 0,
+      createdAt: org.createdAt?.toISOString() ?? null,
     }));
+
+    // Also include orgs that have users but no organizations row (legacy)
+    for (const row of userCounts) {
+      if (!orgSet.has(row.orgId)) {
+        result.push({
+          orgId: row.orgId,
+          name: null,
+          userCount: row.userCount,
+          docCount: docCountMap.get(row.orgId) ?? 0,
+          createdAt: row.earliestCreatedAt ? row.earliestCreatedAt.toISOString() : null,
+        });
+      }
+    }
+
+    return result;
   }
 
   async getByOrgId(orgId: string): Promise<Organization> {
@@ -91,11 +104,15 @@ export class OrganizationManager {
   }
 
   async create(dto: CreateOrgDto): Promise<{ orgId: string; admin: Record<string, unknown> }> {
-    const existingOrg = await this.userRepo.findFirstByOrg(dto.orgId);
-    if (existingOrg) throw new ConflictError("Organization", `orgId '${dto.orgId}'`);
+    // Check both users and organizations tables for existing orgId
+    const [existingOrgRow, existingOrgUser] = await Promise.all([
+      this.orgRepo.findByOrgId(dto.orgId),
+      this.userRepo.findFirstByOrg(dto.orgId),
+    ]);
+    if (existingOrgRow || existingOrgUser) throw new ConflictError("Organization", `orgId '${dto.orgId}'`);
 
-    const existingUser = await this.userRepo.findByEmail(dto.adminUsername);
-    if (existingUser) throw new ConflictError("User", `email '${dto.adminUsername}'`);
+    const existingUser = await this.userRepo.findByEmail(dto.adminEmail);
+    if (existingUser) throw new ConflictError("User", `email '${dto.adminEmail}'`);
 
     // Create the organizations row
     await this.orgRepo.create({
@@ -112,11 +129,20 @@ export class OrganizationManager {
       features: dto.features,
     });
 
+    // Build admin metadata — include password hash only if provided and strategy supports it
+    const metadata: Record<string, unknown> = {};
+    if (dto.adminPassword && this.strategy.hashPassword) {
+      metadata["passwordHash"] = this.strategy.hashPassword(dto.adminPassword);
+    }
+    if (!dto.adminPassword) {
+      metadata["authStrategy"] = "firebase";
+    }
+
     const admin = await this.userRepo.create({
-      email: dto.adminUsername,
+      email: dto.adminEmail,
       orgId: dto.orgId,
       role: "admin",
-      metadata: { passwordHash: this.strategy.hashPassword!(dto.adminPassword) },
+      metadata,
     });
 
     return {
