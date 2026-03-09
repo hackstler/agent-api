@@ -58,26 +58,39 @@ export class OrganizationManager {
   ) {}
 
   async list(): Promise<OrgSummary[]> {
-    const userCounts = await this.userRepo.countByOrg();
-    const docCounts = await this.docRepo.countByOrg();
+    const [allOrgs, userCounts, docCounts] = await Promise.all([
+      this.orgRepo.findAll(),
+      this.userRepo.countByOrg(),
+      this.docRepo.countByOrg(),
+    ]);
 
+    const userCountMap = new Map(userCounts.map((u) => [u.orgId, u]));
     const docCountMap = new Map(docCounts.map((d) => [d.orgId, d.docCount]));
 
-    // Fetch org details for names
-    const orgDetails = await Promise.all(
-      userCounts.map((row) => this.orgRepo.findByOrgId(row.orgId))
-    );
-    const orgNameMap = new Map(
-      orgDetails.filter(Boolean).map((o) => [o!.orgId, o!.name])
-    );
-
-    return userCounts.map((row) => ({
-      orgId: row.orgId,
-      name: orgNameMap.get(row.orgId) ?? null,
-      userCount: row.userCount,
-      docCount: docCountMap.get(row.orgId) ?? 0,
-      createdAt: row.earliestCreatedAt ? row.earliestCreatedAt.toISOString() : null,
+    // Use organizations table as source of truth, enriched with counts
+    const orgSet = new Set(allOrgs.map((o) => o.orgId));
+    const result: OrgSummary[] = allOrgs.map((org) => ({
+      orgId: org.orgId,
+      name: org.name ?? null,
+      userCount: userCountMap.get(org.orgId)?.userCount ?? 0,
+      docCount: docCountMap.get(org.orgId) ?? 0,
+      createdAt: org.createdAt?.toISOString() ?? null,
     }));
+
+    // Also include orgs that have users but no organizations row (legacy)
+    for (const row of userCounts) {
+      if (!orgSet.has(row.orgId)) {
+        result.push({
+          orgId: row.orgId,
+          name: null,
+          userCount: row.userCount,
+          docCount: docCountMap.get(row.orgId) ?? 0,
+          createdAt: row.earliestCreatedAt ? row.earliestCreatedAt.toISOString() : null,
+        });
+      }
+    }
+
+    return result;
   }
 
   async getByOrgId(orgId: string): Promise<Organization> {
