@@ -12,7 +12,7 @@ export interface EntityIndexer<T = unknown> {
   buildSource(entityId: string): string;
 
   /** Convert an entity to a LoadedDocument for the RAG pipeline. */
-  toDocument(entity: T, orgId: string): LoadedDocument;
+  toDocument(entity: T, orgId: string): LoadedDocument | Promise<LoadedDocument>;
 
   /** Index a single entity. Removes stale doc if entity is inactive. */
   index(orgId: string, entityId: string): Promise<ProcessResult | null>;

@@ -7,6 +7,7 @@ const createCatalogValidator = z.object({
   name: z.string().min(1).max(200),
   effectiveDate: z.string().datetime(),
   isActive: z.boolean().optional(),
+  orgId: z.string().min(1).optional(), // super_admin can target a different org
 });
 
 const updateCatalogValidator = z.object({
@@ -105,12 +106,15 @@ export function createCatalogController(manager: CatalogManager, orgRepo?: Organ
   });
 
   router.post("/", async (c) => {
-    const orgId = c.get("user")?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+    const user = c.get("user");
+    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
 
     const body = await c.req.json().catch(() => null);
     const parsed = createCatalogValidator.safeParse(body);
     if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
+
+    // super_admin can target a different org
+    const orgId = (user.role === "super_admin" && parsed.data.orgId) ? parsed.data.orgId : user.orgId;
 
     const catalog = await manager.createCatalog(orgId, {
       name: parsed.data.name,
