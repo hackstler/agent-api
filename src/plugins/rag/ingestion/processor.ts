@@ -29,15 +29,11 @@ export async function processDocument(
 ): Promise<ProcessResult> {
   const source = loaded.metadata.source;
 
-  // 1. Idempotency: delete existing document for this source (chunks cascade)
-  const existing = await db.query.documents.findFirst({
-    where: eq(documents.source, source),
-    columns: { id: true },
-  });
-
-  if (existing) {
-    console.log(`[processor] Re-ingesting existing document: ${source}`);
-    await db.delete(documents).where(eq(documents.id, existing.id));
+  // 1. Idempotency: delete ALL existing documents for this source (chunks cascade)
+  //    Using source match (not findFirst) to avoid race-condition duplicates.
+  const deleted = await db.delete(documents).where(eq(documents.source, source)).returning({ id: documents.id });
+  if (deleted.length > 0) {
+    console.log(`[processor] Re-ingesting: ${source} (removed ${deleted.length} previous)`);
   }
 
   // 2. Enrich document with LLM-extracted metadata

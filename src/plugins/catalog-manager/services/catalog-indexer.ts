@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Catalog, CatalogItem } from "../../../domain/entities/index.js";
 import type { CatalogRepository } from "../../../domain/ports/repositories/catalog.repository.js";
 import type { LoadedDocument } from "../../rag/ingestion/loader.js";
@@ -135,6 +136,10 @@ export class CatalogIndexer implements EntityIndexer<CatalogWithItems> {
     };
   }
 
+  private contentHash(content: string): string {
+    return createHash("sha256").update(content).digest("hex").slice(0, 16);
+  }
+
   async index(orgId: string, catalogId: string): Promise<ProcessResult | null> {
     const catalog = await this.catalogRepo.findByOrgAndId(orgId, catalogId);
     if (!catalog) {
@@ -152,7 +157,26 @@ export class CatalogIndexer implements EntityIndexer<CatalogWithItems> {
     const catalogWithItems: CatalogWithItems = { ...catalog, items };
     const loaded = await this.toDocument(catalogWithItems, orgId);
 
-    console.log(`[catalog-indexer] indexing catalog "${catalog.name}" (${items.length} items)`);
+    // Skip if content hasn't changed (compare hash stored in metadata)
+    const hash = this.contentHash(loaded.content);
+    const source = this.buildSource(catalogId);
+    const existing = await db.query.documents.findFirst({
+      where: eq(documents.source, source),
+      columns: { id: true, metadata: true },
+    });
+
+    if (existing) {
+      const existingHash = (existing.metadata as Record<string, unknown> | null)?.["contentHash"];
+      if (existingHash === hash) {
+        console.log(`[catalog-indexer] skipping "${catalog.name}" — content unchanged`);
+        return { documentId: existing.id, chunkCount: 0, status: "indexed", skipped: true };
+      }
+    }
+
+    // Store hash in metadata for future comparisons
+    loaded.metadata = { ...loaded.metadata, contentHash: hash } as typeof loaded.metadata;
+
+    console.log(`[catalog-indexer] indexing catalog "${catalog.name}" (${items.length} items, hash=${hash})`);
     return processDocument(loaded, orgId);
   }
 

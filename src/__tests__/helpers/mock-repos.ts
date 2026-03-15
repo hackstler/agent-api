@@ -51,6 +51,7 @@ export function createMockConversationRepo(): {
     findByIdWithMessages: vi.fn(),
     findAll: vi.fn(),
     findByTitle: vi.fn(),
+    findByChannelRef: vi.fn(),
     create: vi.fn(),
     delete: vi.fn(),
     updateTitle: vi.fn().mockResolvedValue(undefined),

@@ -31,7 +31,8 @@ export class InMemoryAttachmentStore implements AttachmentStore {
     this.cleanup();
     const entry = this.cache.get(filename);
     if (!entry) {
-      console.log(`[attachmentStore] miss: ${filename} (store size=${this.cache.size})`);
+      const keys = [...this.cache.keys()];
+      console.log(`[attachmentStore] miss: ${filename} (store size=${this.cache.size}, keys=${JSON.stringify(keys)})`);
       return null;
     }
     console.log(`[attachmentStore] hit: ${filename}`);

@@ -19,7 +19,7 @@ export function createQuoteAgent(tools: ToolsInput, strategy: QuoteStrategy): Ag
     name: quoteConfig.agentName,
     description: `Genera presupuestos comparativos de ${strategy.displayName}. Usar cuando el usuario quiera calcular un presupuesto para un cliente.`,
     instructions: strategy.getAgentInstructions(lang),
-    model: google("gemini-2.5-flash"),
+    model: google(ragConfig.llmModel),
     tools,
   });
 }

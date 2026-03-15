@@ -16,6 +16,7 @@ export interface ConversationRepository {
   findByIdWithMessages(id: string): Promise<ConversationWithMessages | null>;
   findAll(filters?: { userId?: string | undefined; limit?: number | undefined }): Promise<Pick<Conversation, "id" | "title" | "createdAt" | "updatedAt">[]>;
   findByTitle(title: string, userId: string): Promise<Pick<Conversation, "id"> | null>;
+  findByChannelRef(channelRef: string, userId: string): Promise<Pick<Conversation, "id"> | null>;
   create(data: NewConversation): Promise<Pick<Conversation, "id" | "title" | "createdAt">>;
   delete(id: string): Promise<boolean>;
   updateTitle(id: string, title: string): Promise<void>;
