@@ -73,7 +73,7 @@ describe("Internal API", () => {
 
   it("POST /internal/whatsapp/message returns 200 with reply", async () => {
     ctx.repos.user.findById.mockResolvedValue(fakeUser({ id: UUID_1 }));
-    ctx.repos.conv.findByTitle.mockResolvedValue({ id: "c-1" });
+    ctx.repos.conv.findByChannelRef.mockResolvedValue({ id: "c-1" });
     ctx.mockAgent.generate.mockResolvedValue({ text: "Hello!", steps: [] });
 
     const res = await ctx.app.request("/internal/whatsapp/message", {
@@ -90,6 +90,58 @@ describe("Internal API", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data.reply).toEqual(expect.any(String));
+  });
+
+  // ── Retry on empty response ──────────────────────────────────────────────────
+
+  it("retries up to 3 times when agent returns empty response", async () => {
+    ctx.repos.user.findById.mockResolvedValue(fakeUser({ id: UUID_1 }));
+    ctx.repos.conv.findByChannelRef.mockResolvedValue({ id: "c-1" });
+
+    // First two calls return empty, third returns text
+    ctx.mockAgent.generate
+      .mockResolvedValueOnce({ text: "", steps: [] })
+      .mockResolvedValueOnce({ text: "  ", steps: [] })
+      .mockResolvedValueOnce({ text: "Hello!", steps: [] });
+
+    const res = await ctx.app.request("/internal/whatsapp/message", {
+      method: "POST",
+      headers: workerHeaders,
+      body: JSON.stringify({
+        userId: UUID_1,
+        messageId: "m-retry",
+        body: "Hello",
+        chatId: "chat-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.reply).toContain("Hello!");
+    expect(ctx.mockAgent.generate).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns fallback after 3 failed attempts", async () => {
+    ctx.repos.user.findById.mockResolvedValue(fakeUser({ id: UUID_1 }));
+    ctx.repos.conv.findByChannelRef.mockResolvedValue({ id: "c-1" });
+
+    ctx.mockAgent.generate.mockResolvedValue({ text: "", steps: [] });
+
+    const res = await ctx.app.request("/internal/whatsapp/message", {
+      method: "POST",
+      headers: workerHeaders,
+      body: JSON.stringify({
+        userId: UUID_1,
+        messageId: "m-fail",
+        body: "Hello",
+        chatId: "chat-1",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.reply).toContain("inténtalo de nuevo");
+    expect(ctx.mockAgent.generate).toHaveBeenCalledTimes(3);
   });
 
   // ── Auth guard ────────────────────────────────────────────────────────────────

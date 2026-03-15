@@ -45,7 +45,7 @@ Hablas con un VENDEDOR de la empresa, NO con un cliente final. Usa un tono profe
 - Las unidades tipicas son: m2 (metro cuadrado), ud (unidad), ml (metro lineal), kg (kilogramo).
 
 Responde SIEMPRE en ${lang}.`,
-    model: google("gemini-2.5-flash"),
+    model: google(ragConfig.llmModel),
     tools,
   });
 }

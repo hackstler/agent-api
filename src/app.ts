@@ -21,8 +21,6 @@ import type { CatalogManager } from "./application/managers/catalog.manager.js";
 import type { InvitationManager } from "./application/managers/invitation.manager.js";
 import type { QuoteRepository } from "./domain/ports/repositories/quote.repository.js";
 import type { OrganizationRepository } from "./domain/ports/repositories/organization.repository.js";
-import type { MastraMemory } from "@mastra/core/memory";
-
 import { createAuthController } from "./api/controllers/auth.controller.js";
 import { createDocumentController } from "./api/controllers/document.controller.js";
 import { createConversationController } from "./api/controllers/conversation.controller.js";
@@ -51,7 +49,6 @@ export interface AppDependencies {
   invitationManager?: InvitationManager;
   quoteRepo?: QuoteRepository;
   organizationRepo?: OrganizationRepository;
-  coordinatorMemory?: MastraMemory;
 }
 
 export function createApp(deps: AppDependencies): Hono {
@@ -144,7 +141,7 @@ export function createApp(deps: AppDependencies): Hono {
   // Internal worker endpoints — worker JWT auth
   const workerAuth = requireWorker();
   app.use("/internal/*", workerAuth);
-  app.route("/internal", createInternalController(deps.waManager, deps.convManager, deps.coordinatorAgent, deps.coordinatorMemory));
+  app.route("/internal", createInternalController(deps.waManager, deps.convManager, deps.coordinatorAgent));
 
   // ── 404 + error fallback ─────────────────────────────────────────────────────
   app.notFound((c) => c.json({ error: "NotFound", message: "Not found" }, 404));

@@ -2,6 +2,7 @@ import { Agent } from "@mastra/core/agent";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { calendarConfig } from "./config/calendar.config.js";
+import { ragConfig } from "../rag/config/rag.config.js";
 
 export function createCalendarAgent(tools: ToolsInput): Agent {
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
@@ -22,7 +23,7 @@ updateCalendarEvent to modify existing events, and deleteCalendarEvent to remove
 Always confirm with the user before creating, updating, or deleting events.
 If the user's Google account is not connected, inform them they need to connect it in Settings.
 When creating events, make sure to ask for date, time, and duration if not provided.`,
-    model: google("gemini-2.5-flash"),
+    model: google(ragConfig.llmModel),
     tools,
   });
 }

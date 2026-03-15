@@ -2,13 +2,11 @@ import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
 import type { Agent } from "@mastra/core/agent";
-import type { MastraMemory } from "@mastra/core/memory";
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "../../../api/helpers/extract-sources.js";
 import { buildAgentOptions } from "../../../application/agent-context.js";
 import type { ConversationManager } from "../../../application/managers/conversation.manager.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
-import { scheduleTitleSync } from "../../../application/title-sync.js";
 
 const chatSchema = z.object({
   query: z.string().min(1).max(10_000),
@@ -19,7 +17,7 @@ const chatSchema = z.object({
 /**
  * Factory: creates chat routes bound to a specific RAG agent instance.
  */
-export function createChatRoutes(agent: Agent, convManager: ConversationManager, memory?: MastraMemory, attachmentStore?: AttachmentStore): Hono {
+export function createChatRoutes(agent: Agent, convManager: ConversationManager, attachmentStore?: AttachmentStore): Hono {
   const chat = new Hono();
 
   /**
@@ -50,8 +48,6 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
       model: ragConfig.llmModel,
       retrievedChunks: sources.map((s) => s.id),
     });
-
-    if (memory) scheduleTitleSync(memory, conversationId, convManager);
 
     return c.json({
       conversationId,
@@ -132,19 +128,11 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
                   model: ragConfig.llmModel,
                   retrievedChunks: collectedSources.map((s) => s.id),
                 });
-                if (memory) scheduleTitleSync(memory, conversationId, convManager);
+
               } catch (err) {
                 console.error("[chat/stream] failed to persist messages:", err instanceof Error ? err.message : err);
               }
             }
-          },
-          delegation: {
-            onDelegationStart: ({ primitiveId, parentAgentName }) => {
-              console.log(`[delegation] ${parentAgentName} → ${primitiveId}`);
-            },
-            onDelegationComplete: ({ primitiveId, duration, success, error }) => {
-              console.log(`[delegation] ${primitiveId} completed in ${(duration / 1000).toFixed(1)}s (success=${success}${error ? `, error=${error.message}` : ""})`);
-            },
           },
         });
 
@@ -205,19 +193,6 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
               break;
             }
 
-            // ── Sub-agent delegation (Supervisor Pattern) ──────────
-            case "agent-execution-start": {
-              const agentId = payload["agentId"] as string | undefined;
-              await emit({ type: "agent-start", agentId: agentId ?? "unknown" });
-              break;
-            }
-
-            case "agent-execution-end": {
-              const agentId = payload["agentId"] as string | undefined;
-              await emit({ type: "agent-end", agentId: agentId ?? "unknown" });
-              break;
-            }
-
             // ── LLM steps ──────────────────────────────────────────
             case "step-start": {
               await emit({ type: "step-start" });
@@ -240,8 +215,19 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
               break;
             }
 
-            // Other chunk types (reasoning, object, etc.) — skip
+            // ── Error from LLM / Mastra ─────────────────────────
+            case "error": {
+              const error = payload["error"] ?? chunk;
+              console.error("[chat/stream] error chunk from agent:", JSON.stringify(error, null, 2));
+              await emit({ type: "error", message: String((error as Record<string, unknown>)?.["message"] ?? error) });
+              break;
+            }
+
+            // Other chunk types (reasoning, object, etc.) — log for diagnostics
             default:
+              if (chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-start" && chunk.type !== "reasoning-end") {
+                console.debug(`[chat/stream] unhandled chunk type: ${chunk.type}`);
+              }
               break;
           }
         }

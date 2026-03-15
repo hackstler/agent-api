@@ -55,9 +55,11 @@ export interface NewUser {
 // ── Conversation ────────────────────────────────────────────────────────────────
 
 export interface ConversationConfig {
-  memoryStrategy: "single-turn" | "fixed-window" | "summary";
+  memoryStrategy?: "single-turn" | "fixed-window" | "summary";
   windowSize?: number;
   systemPrompt?: string;
+  /** Stable channel reference for lookup (e.g. "whatsapp:chatId"). Survives title changes. */
+  channelRef?: string;
 }
 
 export interface Conversation {

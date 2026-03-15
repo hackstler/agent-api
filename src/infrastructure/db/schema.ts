@@ -99,9 +99,10 @@ export const conversations = pgTable("conversations", {
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   title: text("title"),
   config: jsonb("config").$type<{
-    memoryStrategy: "single-turn" | "fixed-window" | "summary";
+    memoryStrategy?: "single-turn" | "fixed-window" | "summary";
     windowSize?: number;
     systemPrompt?: string;
+    channelRef?: string;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

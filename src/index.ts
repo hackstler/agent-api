@@ -39,7 +39,7 @@ import { OAuthManagerAdapter } from "./plugins/google-common/oauth-manager-adapt
 import { InMemoryAttachmentStore } from "./infrastructure/stores/in-memory-attachment-store.js";
 
 // Coordinator agent
-import { createCoordinatorAgent, coordinatorMemory, ensureSubAgentVectorIndex } from "./agent/coordinator.js";
+import { createCoordinatorAgent } from "./agent/coordinator.js";
 
 // Auth strategy
 import { authConfig } from "./config/auth.config.js";
@@ -99,7 +99,6 @@ const coordinatorAgent = createCoordinatorAgent(pluginRegistry);
 // Wire coordinator + convManager + memory into RAG plugin so /chat uses coordinator (enables Gmail/Calendar from dashboard)
 ragPlugin.setCoordinatorAgent(coordinatorAgent);
 ragPlugin.setConversationManager(convManager);
-ragPlugin.setMemory(coordinatorMemory);
 ragPlugin.setAttachmentStore(attachmentStore);
 
 // 6. Create app
@@ -119,7 +118,6 @@ const app = createApp({
   invitationManager,
   quoteRepo,
   organizationRepo: orgRepo,
-  coordinatorMemory,
 });
 
 // ── Startup ────────────────────────────────────────────────────────────────────
@@ -147,7 +145,6 @@ async function main() {
   await seedAdminUser();
 
   await pluginRegistry.initializeAll();
-  await ensureSubAgentVectorIndex();
 
   serve({ fetch: app.fetch, port: PORT }, () => {
     console.log(`[startup] rag-agent-backbone running on http://localhost:${PORT}`);

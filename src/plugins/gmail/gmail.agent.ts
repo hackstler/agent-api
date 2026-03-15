@@ -2,6 +2,7 @@ import { Agent } from "@mastra/core/agent";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { gmailConfig } from "./config/gmail.config.js";
+import { ragConfig } from "../rag/config/rag.config.js";
 
 export function createGmailAgent(tools: ToolsInput): Agent {
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
@@ -32,7 +33,7 @@ ATTACHMENTS:
 - If no filename is mentioned but the user says to attach "the quote" or "el presupuesto", ask them for the filename.
 
 If the user's Google account is not connected, inform them they need to connect it in Settings.`,
-    model: google("gemini-2.5-flash"),
+    model: google(ragConfig.llmModel),
     tools,
   });
 }

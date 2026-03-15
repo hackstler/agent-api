@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import type { Agent } from "@mastra/core/agent";
-import type { MastraMemory } from "@mastra/core/memory";
 import type { WhatsAppManager } from "../../application/managers/whatsapp.manager.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
 import { buildAgentOptions } from "../../application/agent-context.js";
@@ -10,7 +9,6 @@ import { extractSources } from "../helpers/extract-sources.js";
 import { formatForWhatsApp, buildSourcesFooter } from "../helpers/format-whatsapp.js";
 import { ragConfig } from "../../plugins/rag/config/rag.config.js";
 import { pdfStore } from "../../plugins/quote/services/pdf-store.js";
-import { scheduleTitleSync } from "../../application/title-sync.js";
 
 export interface DocumentAttachment {
   base64: string;
@@ -55,22 +53,16 @@ function unwrapDelegationSteps(
     const delegationResult = allToolResults.find((r) => {
       const payload = (r as { payload?: { toolName?: string } }).payload;
       const name = payload?.toolName ?? "";
-      return name.startsWith("delegate-to-") || name.startsWith("delegateTo_") || name.startsWith("agent-");
+      return name.startsWith("delegate-to-") || name.startsWith("delegateTo_");
     });
 
     if (delegationResult) {
       const payload = (delegationResult as {
-        payload: { result?: { toolResults?: Array<unknown>; subAgentToolResults?: Array<unknown> } };
+        payload: { result?: { toolResults?: Array<unknown> } };
       }).payload;
-      // Support both manual delegation (toolResults) and Supervisor Pattern (subAgentToolResults)
-      const nested = payload.result?.toolResults ?? payload.result?.subAgentToolResults ?? [];
+      const nested = payload.result?.toolResults ?? [];
       if (nested.length > 0) {
-        // Normalize subAgentToolResults to the same shape as Mastra toolResults (wrap in payload)
-        const normalized = nested.map((r) => {
-          const asPayload = r as { payload?: unknown; toolName?: string };
-          return asPayload.payload ? r : { payload: r };
-        });
-        unwrapped.push({ toolResults: normalized });
+        unwrapped.push({ toolResults: nested });
       }
     } else {
       unwrapped.push(step);
@@ -84,7 +76,6 @@ export function createInternalController(
   waManager: WhatsAppManager,
   convManager: ConversationManager,
   agent: Agent,
-  memory?: MastraMemory,
 ): Hono {
   const router = new Hono();
 
@@ -134,28 +125,43 @@ export function createInternalController(
     const orgId = await waManager.resolveOrgId(userId);
 
     try {
-      const conversationId = await convManager.resolveOrCreateByTitle(
+      const conversationId = await convManager.resolveOrCreateForChannel(
         `whatsapp:${chatId}`,
         userId,
+        `WhatsApp: ${chatId}`,
       );
 
       const pdfRequestId = randomUUID();
       const agentOptions = buildAgentOptions({ userId, orgId, conversationId, pdfRequestId });
 
-      const result = await agent.generate(messageBody, agentOptions);
+      let result: Awaited<ReturnType<typeof agent.generate>> | undefined;
+      let replyText = "";
+      const MAX_ATTEMPTS = 3;
 
-      const replyText = result.text?.trim();
-      if (!replyText) {
-        console.error("[internal/message] agent returned empty response", {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        result = await agent.generate(messageBody, agentOptions);
+        replyText = result.text?.trim() ?? "";
+
+        if (replyText) break;
+
+        const raw = result as Record<string, unknown>;
+        console.warn(`[internal/message] empty response attempt ${attempt}/${MAX_ATTEMPTS}`, {
           userId,
-          steps: result.steps?.length ?? 0,
+          finishReason: raw["finishReason"],
+          runId: raw["runId"],
+          stepsCount: result.steps?.length ?? 0,
+          textLength: result.text?.length ?? 0,
         });
+      }
+
+      if (!replyText) {
+        console.error("[internal/message] agent returned empty response after all retries", { userId });
         return c.json({
           data: { reply: "Lo siento, no pude procesar tu solicitud. Por favor, inténtalo de nuevo." },
         });
       }
 
-      const steps = unwrapDelegationSteps(result.steps ?? []);
+      const steps = unwrapDelegationSteps(result!.steps ?? []);
       const sources = extractSources(steps);
 
       // Persist messages separately — don't let a DB error kill the reply
@@ -164,7 +170,6 @@ export function createInternalController(
           model: ragConfig.llmModel,
           retrievedChunks: sources.map((s) => s.id),
         });
-        if (memory) scheduleTitleSync(memory, conversationId, convManager);
       } catch (persistError) {
         console.error("[internal/message] failed to persist messages:", persistError);
       }

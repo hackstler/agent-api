@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { Agent } from "@mastra/core/agent";
-import type { MastraMemory } from "@mastra/core/memory";
 import type { Plugin } from "../plugin.interface.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
@@ -16,7 +15,6 @@ export class RagPlugin implements Plugin {
   readonly tools = ragTools;
   private coordinatorAgent?: Agent;
   private convManager?: ConversationManager;
-  private memory?: MastraMemory;
   private attachmentStore?: AttachmentStore;
 
   setCoordinatorAgent(agent: Agent): void {
@@ -25,10 +23,6 @@ export class RagPlugin implements Plugin {
 
   setConversationManager(convManager: ConversationManager): void {
     this.convManager = convManager;
-  }
-
-  setMemory(memory: MastraMemory): void {
-    this.memory = memory;
   }
 
   setAttachmentStore(store: AttachmentStore): void {
@@ -42,7 +36,7 @@ export class RagPlugin implements Plugin {
     const app = new Hono();
 
     // Use coordinator if available (enables Gmail/Calendar delegation from dashboard)
-    app.route("/chat", createChatRoutes(this.coordinatorAgent ?? this.agent, this.convManager, this.memory, this.attachmentStore));
+    app.route("/chat", createChatRoutes(this.coordinatorAgent ?? this.agent, this.convManager, this.attachmentStore));
     app.route("/ingest", createIngestRoutes());
 
     return app;

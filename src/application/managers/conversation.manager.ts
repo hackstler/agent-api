@@ -44,6 +44,22 @@ export class ConversationManager {
     return conv.id;
   }
 
+  /**
+   * Resolve or create a conversation by stable channel reference.
+   * Unlike title-based lookup, channelRef survives title changes (e.g. from scheduleTitleSync).
+   */
+  async resolveOrCreateForChannel(channelRef: string, userId: string, title?: string): Promise<string> {
+    const existing = await this.repo.findByChannelRef(channelRef, userId);
+    if (existing) return existing.id;
+
+    const conv = await this.repo.create({
+      userId,
+      title: title ?? "New conversation",
+      config: { channelRef },
+    });
+    return conv.id;
+  }
+
   async updateTitle(id: string, title: string): Promise<void> {
     await this.repo.updateTitle(id, title);
   }
