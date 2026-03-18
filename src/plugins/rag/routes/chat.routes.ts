@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import type { AgentRunner } from "../../../agent/agent-runner.js";
 import type { DelegationResult } from "../../../agent/types.js";
 import { extractToolSummaries, summarizeToolCall } from "../../../agent/tool-summaries.js";
+import { getExecutionContext, deleteExecutionContext } from "../../../agent/execution-context.js";
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "../../../api/helpers/extract-sources.js";
 import { createAgentContext } from "../../../application/agent-context.js";
@@ -42,7 +44,8 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
     const userId = c.get("user")?.userId;
     const conversationId = await resolveConversationId(parsed.data.conversationId, convManager, userId, query);
 
-    const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId });
+    const requestId = randomUUID();
+    const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId, requestId });
     const history = await loadConversationHistory(convManager, conversationId);
 
     const result = await agent.generate({ prompt: query, messages: history, experimental_context });
@@ -56,10 +59,21 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
       toolCalls: toolSummaries,
     });
 
+    // Check for pending approvals (human-in-the-loop)
+    const execCtx = getExecutionContext(requestId);
+    const pendingActions = execCtx?.getPending() ?? [];
+    deleteExecutionContext(requestId);
+
     return c.json({
       conversationId,
       answer: result.text,
       sources,
+      ...(pendingActions.length > 0 ? {
+        confirmationNeeded: {
+          requestId,
+          actions: pendingActions.map((a) => ({ id: a.id, toolName: a.toolName, input: a.input, description: a.description })),
+        },
+      } : {}),
       metadata: {
         model: ragConfig.llmModel,
         chunksRetrieved: sources.length,
@@ -116,6 +130,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
       let sourcesEmitted = false;
       const collectedSources: Array<{ id: string; documentTitle: string; documentSource: string; score: number; excerpt: string }> = [];
       const collectedToolSummaries: ToolCallSummary[] = [];
+      const requestId = randomUUID();
 
       /** Helper: emit an SSE event */
       const emit = (data: Record<string, unknown>) =>
@@ -126,6 +141,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
           userId: userId ?? "anonymous",
           orgId,
           conversationId,
+          requestId,
         });
         const history = await loadConversationHistory(convManager, conversationId);
 
@@ -271,12 +287,19 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
               break;
             }
 
+            // ── Tool approval (human-in-the-loop) ────────────────
+            case "tool-approval-request": {
+              // The SDK blocked execution. Details are already in the ExecutionContext
+              // (written by needsApproval). We don't emit here — we emit after the stream.
+              break;
+            }
+
             // Other chunk types (reasoning, text-start, text-end, etc.) — ignore silently
             default: {
               const ignoredTypes = new Set([
                 "reasoning-delta", "reasoning-start", "reasoning-end",
                 "text-start", "text-end",
-                "tool-input-start", "tool-input-delta",
+                "tool-input-start", "tool-input-delta", "tool-input-end",
               ]);
               if (!ignoredTypes.has(chunk.type)) {
                 console.debug(`[chat/stream] unhandled chunk type: ${chunk.type}`);
@@ -302,13 +325,58 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
             console.error("[chat/stream] failed to persist assistant message:", err instanceof Error ? err.message : err);
           }
         }
+        // Emit pending approval actions (human-in-the-loop)
+        const execCtx = getExecutionContext(requestId);
+        const pendingActions = execCtx?.getPending() ?? [];
+        if (pendingActions.length > 0) {
+          await emit({
+            type: "confirmation-needed",
+            requestId,
+            actions: pendingActions.map((a) => ({
+              id: a.id,
+              toolName: a.toolName,
+              input: a.input,
+              description: a.description,
+            })),
+          });
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Internal error";
         await emit({ type: "error", message: msg });
       } finally {
+        deleteExecutionContext(requestId);
         await emit({ type: "done" });
       }
     });
+  });
+
+  /**
+   * POST /chat/confirm
+   * Approve or reject a pending action from the human-in-the-loop flow.
+   * After confirming, the frontend should re-send the original query —
+   * this time needsApproval will find the action confirmed and let execute() run.
+   */
+  const confirmSchema = z.object({
+    requestId: z.string().uuid(),
+    actionId: z.string().min(1),
+    approved: z.boolean(),
+  });
+
+  chat.post("/confirm", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = confirmSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+
+    const ctx = getExecutionContext(parsed.data.requestId);
+    if (!ctx) return c.json({ error: "Request expired", message: "The confirmation window has expired. Please try again." }, 410);
+
+    if (parsed.data.approved) {
+      ctx.confirm(parsed.data.actionId);
+    } else {
+      ctx.deny(parsed.data.actionId);
+    }
+
+    return c.json({ data: { ok: true, actionId: parsed.data.actionId, approved: parsed.data.approved } });
   });
 
   return chat;
