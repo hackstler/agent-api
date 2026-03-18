@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import type { AgentRunner } from "../../agent/agent-runner.js";
 import type { AgentStep, AgentGenerateResult, DelegationResult } from "../../agent/types.js";
 import { extractToolSummaries } from "../../agent/tool-summaries.js";
-import { getExecutionContext, deleteExecutionContext } from "../../agent/execution-context.js";
+import { getOrCreateExecutionContext } from "../../agent/execution-context.js";
 import type { WhatsAppManager } from "../../application/managers/whatsapp.manager.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
 import { createAgentContext } from "../../application/agent-context.js";
@@ -129,8 +129,25 @@ export function createInternalController(
       );
 
       const pdfRequestId = randomUUID();
-      const requestId = randomUUID();
-      const experimental_context = createAgentContext({ userId, orgId, conversationId, pdfRequestId, requestId });
+      const experimental_context = createAgentContext({ userId, orgId, conversationId, pdfRequestId });
+
+      // Human-in-the-loop: if there are pending approvals from the previous turn
+      // and the user sent a confirmation, confirm them before calling the agent.
+      const execCtx = getOrCreateExecutionContext(conversationId);
+      if (execCtx.hasPending()) {
+        const isConfirmation = /^(s[ií]+|ok|dale|claro|vale|confirma|envía(lo)?|hazlo|yes|y)$/i.test(messageBody.trim());
+        const isDenial = /^(no|cancel(a|ar)?|nah)$/i.test(messageBody.trim());
+
+        if (isConfirmation) {
+          execCtx.confirmAll();
+          // Fall through — the agent will re-execute and needsApproval will find them confirmed
+        } else if (isDenial) {
+          execCtx.denyAll();
+          return c.json({ data: { reply: "De acuerdo, acción cancelada. ¿En qué más puedo ayudarte?" } });
+        }
+        // If neither confirmation nor denial, treat as a new intent (fall through to agent)
+      }
+
       const history = await loadConversationHistory(convManager, conversationId);
 
       let result: AgentGenerateResult | undefined;
@@ -177,19 +194,16 @@ export function createInternalController(
       }
 
       // Check for pending approvals (human-in-the-loop)
-      const execCtx = getExecutionContext(requestId);
-      const pendingActions = execCtx?.getPending() ?? [];
-      deleteExecutionContext(requestId);
+      const pendingActions = execCtx.getPending();
 
       if (pendingActions.length > 0) {
-        // WhatsApp can't show buttons — return confirmation text as reply.
-        // The user will respond "sí" and the coordinator's CONFIRMATION HANDLING
-        // will re-trigger the action with "CONFIRMED:" prefix.
+        // Actions blocked by needsApproval — return confirmation text.
+        // On the next turn, if user says "sí", the controller will call
+        // execCtx.confirmAll() BEFORE calling the agent (see above).
         const confirmText = pendingActions
           .map((a) => `⚠️ *Confirmación necesaria*\n${a.description}\n\n¿Lo confirmo? Responde *sí* o *no*.`)
           .join("\n\n");
 
-        // Persist the confirmation request as the assistant's response
         try {
           await convManager.persistMessages(conversationId, messageBody, confirmText, {
             model: ragConfig.llmModel,

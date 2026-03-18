@@ -1,11 +1,10 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import { randomUUID } from "crypto";
 import type { AgentRunner } from "../../../agent/agent-runner.js";
 import type { DelegationResult } from "../../../agent/types.js";
 import { extractToolSummaries, summarizeToolCall } from "../../../agent/tool-summaries.js";
-import { getExecutionContext, deleteExecutionContext } from "../../../agent/execution-context.js";
+import { getOrCreateExecutionContext } from "../../../agent/execution-context.js";
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "../../../api/helpers/extract-sources.js";
 import { createAgentContext } from "../../../application/agent-context.js";
@@ -44,8 +43,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
     const userId = c.get("user")?.userId;
     const conversationId = await resolveConversationId(parsed.data.conversationId, convManager, userId, query);
 
-    const requestId = randomUUID();
-    const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId, requestId });
+    const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId });
     const history = await loadConversationHistory(convManager, conversationId);
 
     const result = await agent.generate({ prompt: query, messages: history, experimental_context });
@@ -60,9 +58,8 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
     });
 
     // Check for pending approvals (human-in-the-loop)
-    const execCtx = getExecutionContext(requestId);
-    const pendingActions = execCtx?.getPending() ?? [];
-    deleteExecutionContext(requestId);
+    const execCtx = getOrCreateExecutionContext(conversationId);
+    const pendingActions = execCtx.getPending();
 
     return c.json({
       conversationId,
@@ -70,7 +67,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
       sources,
       ...(pendingActions.length > 0 ? {
         confirmationNeeded: {
-          requestId,
+          conversationId,
           actions: pendingActions.map((a) => ({ id: a.id, toolName: a.toolName, input: a.input, description: a.description })),
         },
       } : {}),
@@ -130,7 +127,6 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
       let sourcesEmitted = false;
       const collectedSources: Array<{ id: string; documentTitle: string; documentSource: string; score: number; excerpt: string }> = [];
       const collectedToolSummaries: ToolCallSummary[] = [];
-      const requestId = randomUUID();
 
       /** Helper: emit an SSE event */
       const emit = (data: Record<string, unknown>) =>
@@ -141,7 +137,6 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
           userId: userId ?? "anonymous",
           orgId,
           conversationId,
-          requestId,
         });
         const history = await loadConversationHistory(convManager, conversationId);
 
@@ -326,12 +321,12 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
           }
         }
         // Emit pending approval actions (human-in-the-loop)
-        const execCtx = getExecutionContext(requestId);
-        const pendingActions = execCtx?.getPending() ?? [];
+        const execCtx = getOrCreateExecutionContext(conversationId);
+        const pendingActions = execCtx.getPending();
         if (pendingActions.length > 0) {
           await emit({
             type: "confirmation-needed",
-            requestId,
+            conversationId,
             actions: pendingActions.map((a) => ({
               id: a.id,
               toolName: a.toolName,
@@ -344,7 +339,6 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
         const msg = error instanceof Error ? error.message : "Internal error";
         await emit({ type: "error", message: msg });
       } finally {
-        deleteExecutionContext(requestId);
         await emit({ type: "done" });
       }
     });
@@ -357,7 +351,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
    * this time needsApproval will find the action confirmed and let execute() run.
    */
   const confirmSchema = z.object({
-    requestId: z.string().uuid(),
+    conversationId: z.string().uuid(),
     actionId: z.string().min(1),
     approved: z.boolean(),
   });
@@ -367,7 +361,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
     const parsed = confirmSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
 
-    const ctx = getExecutionContext(parsed.data.requestId);
+    const ctx = getOrCreateExecutionContext(parsed.data.conversationId);
     if (!ctx) return c.json({ error: "Request expired", message: "The confirmation window has expired. Please try again." }, 410);
 
     if (parsed.data.approved) {

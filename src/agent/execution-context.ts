@@ -1,13 +1,12 @@
 /**
- * Request-scoped execution context for human-in-the-loop approval.
+ * Conversation-scoped execution context for human-in-the-loop approval.
  *
- * Acts as a shared store (Redux-like) accessible from any point in the agent chain:
- * controller → coordinator → delegation → sub-agent → tool.
+ * Keyed by conversationId (persists across turns within the same conversation).
+ * Tools register pending actions → controllers read them and ask for confirmation →
+ * on the next turn, the controller confirms pending actions before calling the agent.
  *
- * Tools write pending actions via needsApproval callbacks.
- * Controllers read pending actions after the stream to emit confirmation events.
- *
- * Keyed by requestId (UUID generated per request).
+ * The approval flow is tool-agnostic: any tool with needsApproval registers here,
+ * and the controller handles the confirmation loop. Tools never inspect message text.
  */
 
 export interface PendingAction {
@@ -22,58 +21,75 @@ export class ExecutionContext {
   private pending = new Map<string, PendingAction>();
   private confirmed = new Set<string>();
 
-  /** Register an action that needs user approval before execution. */
+  /** Tool registers an action that needs user approval before execution. */
   registerPending(action: PendingAction): void {
     this.pending.set(action.id, action);
   }
 
-  /** Mark an action as approved by the user. */
+  /** Controller marks an action as approved (before calling the agent on the next turn). */
   confirm(actionId: string): void {
     this.confirmed.add(actionId);
     this.pending.delete(actionId);
   }
 
-  /** Mark an action as rejected by the user. */
+  /** Controller marks all pending actions as approved. */
+  confirmAll(): void {
+    for (const id of this.pending.keys()) {
+      this.confirmed.add(id);
+    }
+    this.pending.clear();
+  }
+
+  /** Controller rejects an action. */
   deny(actionId: string): void {
     this.pending.delete(actionId);
   }
 
-  /** Check if an action was approved. */
+  /** Controller rejects all pending actions. */
+  denyAll(): void {
+    this.pending.clear();
+  }
+
+  /** Tool checks if an action was approved. */
   isConfirmed(actionId: string): boolean {
     return this.confirmed.has(actionId);
   }
 
-  /** Get all actions pending user approval. */
+  /** Controller reads all actions pending user approval. */
   getPending(): PendingAction[] {
     return Array.from(this.pending.values());
   }
 
-  /** Clean up all state. */
-  clear(): void {
-    this.pending.clear();
+  /** Check if there are any pending actions. */
+  hasPending(): boolean {
+    return this.pending.size > 0;
+  }
+
+  /** Clean up confirmed set (after successful execution). */
+  clearConfirmed(): void {
     this.confirmed.clear();
   }
 }
 
-// ── Registry: requestId → ExecutionContext ────────────────────────────────────
+// ── Registry: conversationId → ExecutionContext ──────────────────────────────
 
 const contexts = new Map<string, ExecutionContext>();
 const TTL_MS = 15 * 60 * 1000; // 15 minutes
 
-export function getOrCreateExecutionContext(requestId: string): ExecutionContext {
-  let ctx = contexts.get(requestId);
+export function getOrCreateExecutionContext(conversationId: string): ExecutionContext {
+  let ctx = contexts.get(conversationId);
   if (!ctx) {
     ctx = new ExecutionContext();
-    contexts.set(requestId, ctx);
-    setTimeout(() => contexts.delete(requestId), TTL_MS);
+    contexts.set(conversationId, ctx);
+    setTimeout(() => contexts.delete(conversationId), TTL_MS);
   }
   return ctx;
 }
 
-export function getExecutionContext(requestId: string): ExecutionContext | undefined {
-  return contexts.get(requestId);
+export function getExecutionContext(conversationId: string): ExecutionContext | undefined {
+  return contexts.get(conversationId);
 }
 
-export function deleteExecutionContext(requestId: string): void {
-  contexts.delete(requestId);
+export function deleteExecutionContext(conversationId: string): void {
+  contexts.delete(conversationId);
 }

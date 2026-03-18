@@ -36,30 +36,21 @@ exactly as shown when it was generated (e.g., "PRES-20260306-1234.pdf").`,
         .describe("Filename of a previously generated document to attach (e.g., PRES-20260306-1234.pdf)"),
     }),
 
-    // ── FRENO: se evalúa ANTES de execute() ──────────────────────────
-    // Si devuelve true, el SDK NO llama a execute() y retorna un
-    // tool-approval-request. El ExecutionContext registra los detalles
-    // para que el controller los pueda leer y emitir al frontend.
-    needsApproval: async (input, { experimental_context, messages }) => {
-      const requestId = getAgentContextValue(
-        { experimental_context },
-        "requestId",
-      );
-      if (!requestId) return false;
+    // ── FRENO: tool-agnostic approval via ExecutionContext ───────────
+    // The tool only reads/writes the shared context. It never inspects
+    // message text or knows about confirmation flows — that's the
+    // controller's job.
+    needsApproval: async (input, { experimental_context }) => {
+      const conversationId = getAgentContextValue({ experimental_context }, "conversationId");
+      if (!conversationId) return false;
 
-      // If the last user message contains "CONFIRMED" (coordinator enriched it),
-      // this is a re-delegation after user confirmed → let execute() run.
-      const lastUserMsg = [...(messages ?? [])].reverse().find((m) => m.role === "user");
-      const lastText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
-      if (lastText.includes("CONFIRMED")) return false;
-
-      const ctx = getOrCreateExecutionContext(requestId);
+      const ctx = getOrCreateExecutionContext(conversationId);
       const actionId = `sendEmail:${input.to}:${input.subject}`;
 
-      // Already confirmed via POST /chat/confirm → let execute() run
+      // Already confirmed by the controller on this turn → execute
       if (ctx.isConfirmed(actionId)) return false;
 
-      // Registrar como pendiente — el controller lo leerá tras el stream
+      // Register and block
       ctx.registerPending({
         id: actionId,
         toolName: "sendEmail",
@@ -68,10 +59,9 @@ exactly as shown when it was generated (e.g., "PRES-20260306-1234.pdf").`,
         createdAt: Date.now(),
       });
 
-      return true; // → SDK NO ejecuta execute()
+      return true;
     },
 
-    // ── ACCIÓN: solo se llama si needsApproval devolvió false ────────
     execute: async ({ to, subject, body, attachmentFilename }, { experimental_context }) => {
       const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error("Missing userId in request context");
@@ -87,6 +77,14 @@ exactly as shown when it was generated (e.g., "PRES-20260306-1234.pdf").`,
       }
 
       const result = await gmailService.sendEmail(userId, to, subject, body, attachment);
+
+      // Clean up confirmed flag after successful execution
+      const conversationId = getAgentContextValue({ experimental_context }, "conversationId");
+      if (conversationId) {
+        const ctx = getOrCreateExecutionContext(conversationId);
+        ctx.clearConfirmed();
+      }
+
       return { ...result, attachmentIncluded: !!attachment };
     },
   });

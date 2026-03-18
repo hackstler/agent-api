@@ -8,7 +8,6 @@ export interface AgentContext {
   orgId: string;
   conversationId: string;
   pdfRequestId?: string;
-  requestId?: string;
 }
 
 /**
