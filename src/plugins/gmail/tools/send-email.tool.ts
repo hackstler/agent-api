@@ -40,18 +40,23 @@ exactly as shown when it was generated (e.g., "PRES-20260306-1234.pdf").`,
     // Si devuelve true, el SDK NO llama a execute() y retorna un
     // tool-approval-request. El ExecutionContext registra los detalles
     // para que el controller los pueda leer y emitir al frontend.
-    needsApproval: async (input, { experimental_context }) => {
+    needsApproval: async (input, { experimental_context, messages }) => {
       const requestId = getAgentContextValue(
         { experimental_context },
         "requestId",
       );
-      // Sin requestId → no se puede trackear (e.g., WhatsApp auto-confirm)
       if (!requestId) return false;
+
+      // If the last user message contains "CONFIRMED" (coordinator enriched it),
+      // this is a re-delegation after user confirmed → let execute() run.
+      const lastUserMsg = [...(messages ?? [])].reverse().find((m) => m.role === "user");
+      const lastText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
+      if (lastText.includes("CONFIRMED")) return false;
 
       const ctx = getOrCreateExecutionContext(requestId);
       const actionId = `sendEmail:${input.to}:${input.subject}`;
 
-      // Ya confirmado por el usuario → dejar pasar a execute()
+      // Already confirmed via POST /chat/confirm → let execute() run
       if (ctx.isConfirmed(actionId)) return false;
 
       // Registrar como pendiente — el controller lo leerá tras el stream

@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import type { AgentRunner } from "../../agent/agent-runner.js";
 import type { AgentStep, AgentGenerateResult, DelegationResult } from "../../agent/types.js";
 import { extractToolSummaries } from "../../agent/tool-summaries.js";
+import { getExecutionContext, deleteExecutionContext } from "../../agent/execution-context.js";
 import type { WhatsAppManager } from "../../application/managers/whatsapp.manager.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
 import { createAgentContext } from "../../application/agent-context.js";
@@ -128,7 +129,8 @@ export function createInternalController(
       );
 
       const pdfRequestId = randomUUID();
-      const experimental_context = createAgentContext({ userId, orgId, conversationId, pdfRequestId });
+      const requestId = randomUUID();
+      const experimental_context = createAgentContext({ userId, orgId, conversationId, pdfRequestId, requestId });
       const history = await loadConversationHistory(convManager, conversationId);
 
       let result: AgentGenerateResult | undefined;
@@ -172,6 +174,32 @@ export function createInternalController(
         });
       } catch (persistError) {
         console.error("[internal/message] failed to persist messages:", persistError);
+      }
+
+      // Check for pending approvals (human-in-the-loop)
+      const execCtx = getExecutionContext(requestId);
+      const pendingActions = execCtx?.getPending() ?? [];
+      deleteExecutionContext(requestId);
+
+      if (pendingActions.length > 0) {
+        // WhatsApp can't show buttons — return confirmation text as reply.
+        // The user will respond "sí" and the coordinator's CONFIRMATION HANDLING
+        // will re-trigger the action with "CONFIRMED:" prefix.
+        const confirmText = pendingActions
+          .map((a) => `⚠️ *Confirmación necesaria*\n${a.description}\n\n¿Lo confirmo? Responde *sí* o *no*.`)
+          .join("\n\n");
+
+        // Persist the confirmation request as the assistant's response
+        try {
+          await convManager.persistMessages(conversationId, messageBody, confirmText, {
+            model: ragConfig.llmModel,
+            toolCalls: toolSummaries,
+          });
+        } catch (persistError) {
+          console.error("[internal/message] failed to persist confirmation messages:", persistError);
+        }
+
+        return c.json({ data: { reply: confirmText } });
       }
 
       const waText = formatForWhatsApp(replyText) + buildSourcesFooter(sources);
