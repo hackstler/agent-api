@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import { ragConfig } from "../config/rag.config.js";
 import { runRetrievalPipeline } from "../pipeline/retrieval-pipeline.js";
@@ -23,8 +23,7 @@ export const searchDocumentsEntry: ToolEntry = {
 };
 
 export function createSearchDocumentsTool({ embedder, retriever, reranker }: ToolRegistryDeps) {
-  return createTool({
-    id: "search-documents",
+  return tool({
     description: `Search the knowledge base for relevant document chunks using semantic similarity.
 ALWAYS call this tool first before answering any question that may be in the knowledge base.
 Returns the most relevant text passages ranked by relevance score.`,
@@ -34,12 +33,8 @@ Returns the most relevant text passages ranked by relevance score.`,
       documentIds: z.array(z.string()).optional(),
       topicId: z.string().optional().describe("Filter by topic ID to narrow results"),
     }),
-    outputSchema: z.object({
-      chunks: z.array(chunkSchema),
-      chunkCount: z.number(),
-    }),
-    execute: async ({ query, topK = ragConfig.topK, documentIds, topicId }, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async ({ query, topK = ragConfig.topK, documentIds, topicId }, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) throw new Error('Missing orgId in request context');
       const { chunks, chunkCount } = await runRetrievalPipeline(
         query,

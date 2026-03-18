@@ -1,4 +1,4 @@
-import type { Conversation } from "../../domain/entities/index.js";
+import type { Conversation, MessageMetadata, ToolCallSummary } from "../../domain/entities/index.js";
 import type {
   ConversationRepository,
   ConversationWithMessages,
@@ -69,8 +69,22 @@ export class ConversationManager {
     conversationId: string,
     userMessage: string,
     assistantMessage: string,
-    metadata: { model?: string; retrievedChunks?: string[] },
+    metadata: { model?: string; retrievedChunks?: string[]; toolCalls?: ToolCallSummary[] },
   ): Promise<void> {
     await this.repo.persistMessages({ conversationId, userMessage, assistantMessage, metadata });
+  }
+
+  /** Persist only the user message. Used in streaming to save the query before the stream starts. */
+  async persistUserMessage(conversationId: string, content: string): Promise<void> {
+    await this.repo.persistUserMessage(conversationId, content);
+  }
+
+  /** Persist only the assistant response with metadata. Used after stream completes. */
+  async persistAssistantMessage(
+    conversationId: string,
+    content: string,
+    metadata?: MessageMetadata,
+  ): Promise<void> {
+    await this.repo.persistAssistantMessage(conversationId, content, metadata);
   }
 }

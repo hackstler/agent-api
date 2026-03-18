@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CalendarApiService } from "../services/calendar-api.service.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
@@ -8,8 +8,7 @@ export interface CreateEventDeps {
 }
 
 export function createCreateEventTool({ calendarService }: CreateEventDeps) {
-  return createTool({
-    id: "createCalendarEvent",
+  return tool({
     description:
       "Create a new event in the user's Google Calendar. Requires the user's Google account to be connected.",
 
@@ -23,14 +22,8 @@ export function createCreateEventTool({ calendarService }: CreateEventDeps) {
       timeZone: z.string().optional().describe("IANA time zone (e.g. Europe/Madrid). Defaults to UTC."),
     }),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      eventId: z.string(),
-      htmlLink: z.string(),
-    }),
-
-    execute: async ({ summary, start, end, description, location, attendees, timeZone }, context) => {
-      const userId = getAgentContextValue(context, "userId");
+    execute: async ({ summary, start, end, description, location, attendees, timeZone }, { experimental_context }) => {
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error('Missing userId in request context');
       return calendarService.createEvent(userId, {
         summary,

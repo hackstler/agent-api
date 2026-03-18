@@ -1,5 +1,5 @@
 import type { Plugin } from "../plugin.interface.js";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../../agent/types.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import type { OrganizationRepository } from "../../domain/ports/repositories/organization.repository.js";
 import type { QuoteRepository } from "../../domain/ports/repositories/quote.repository.js";
@@ -21,7 +21,7 @@ export class QuotePlugin implements Plugin {
   readonly name = "Quote Plugin";
   readonly description: string;
   readonly agent;
-  readonly tools: ToolsInput;
+  readonly tools: AgentTools;
 
   constructor({ attachmentStore, organizationRepo, quoteRepo }: QuotePluginDeps) {
     const catalogService = new CatalogService();

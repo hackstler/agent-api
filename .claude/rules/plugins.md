@@ -8,12 +8,15 @@ El coordinator agent orquesta todos los plugins registrados.
 
 Interface en `src/plugins/plugin.interface.ts`:
 ```typescript
+import type { AgentRunner } from "../agent/agent-runner.js";
+import type { AgentTools } from "../agent/types.js";
+
 interface Plugin {
   id: string              // identificador único (ej: "rag", "quote")
   name: string            // nombre descriptivo
   description: string     // para el system prompt del coordinator
-  agent?: Agent           // Mastra agent del plugin (opcional)
-  tools: ToolsInput       // tools que expone al coordinator
+  agent: AgentRunner      // Vercel AI SDK agent del plugin
+  tools: AgentTools       // tools que expone al coordinator (ToolSet)
   routes?(): Hono         // rutas HTTP propias (ej: /chat, /ingest)
   ensureTables?(): Promise<void>   // crear tablas propias si no existen
   initialize?(): Promise<void>     // setup al arrancar

@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { GmailApiService } from "../services/gmail-api.service.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
@@ -10,8 +10,7 @@ export interface SendEmailDeps {
 }
 
 export function createSendEmailTool({ gmailService, attachmentStore }: SendEmailDeps) {
-  return createTool({
-    id: "sendEmail",
+  return tool({
     description:
       `Send an email via the user's Gmail account, optionally with a file attachment.
 Confirm details with the user before sending unless the query contains CONFIRMED.
@@ -36,14 +35,8 @@ exactly as shown when it was generated (e.g., "PRES-20260306-1234.pdf").`,
         .optional()
         .describe("Filename of a previously generated document to attach (e.g., PRES-20260306-1234.pdf)"),
     }),
-    outputSchema: z.object({
-      success: z.boolean(),
-      messageId: z.string(),
-      threadId: z.string(),
-      attachmentIncluded: z.boolean(),
-    }),
-    execute: async ({ to, subject, body, attachmentFilename }, context) => {
-      const userId = getAgentContextValue(context, "userId");
+    execute: async ({ to, subject, body, attachmentFilename }, { experimental_context }) => {
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error('Missing userId in request context');
 
       let attachment: { base64: string; mimetype: string; filename: string } | undefined;

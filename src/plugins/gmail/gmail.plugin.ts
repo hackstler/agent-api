@@ -1,5 +1,5 @@
 import type { Plugin } from "../plugin.interface.js";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../../agent/types.js";
 import type { OAuthTokenProvider } from "../google-common/oauth-token-provider.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import { GmailApiService } from "./services/gmail-api.service.js";
@@ -14,7 +14,7 @@ export class GmailPlugin implements Plugin {
   readonly name = "Gmail Plugin";
   readonly description = "List, read, search, and send emails via Gmail. Can attach previously generated documents (e.g., PDF quotes).";
   readonly agent;
-  readonly tools: ToolsInput;
+  readonly tools: AgentTools;
 
   constructor(tokenProvider: OAuthTokenProvider, attachmentStore: AttachmentStore) {
     const service = new GmailApiService(tokenProvider);

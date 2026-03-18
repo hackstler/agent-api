@@ -12,7 +12,7 @@ import type { ConversationManager } from "./application/managers/conversation.ma
 import type { WhatsAppManager } from "./application/managers/whatsapp.manager.js";
 import type { TopicManager } from "./application/managers/topic.manager.js";
 import type { OrganizationManager } from "./application/managers/organization.manager.js";
-import type { Agent } from "@mastra/core/agent";
+import type { AgentRunner } from "./agent/agent-runner.js";
 import type { PluginRegistry } from "./plugins/plugin-registry.js";
 import type { AuthConfig } from "./config/auth.config.js";
 import type { AuthStrategy } from "./domain/ports/auth-strategy.js";
@@ -40,7 +40,7 @@ export interface AppDependencies {
   waManager: WhatsAppManager;
   topicManager: TopicManager;
   orgManager: OrganizationManager;
-  coordinatorAgent: Agent;
+  coordinatorAgent: AgentRunner;
   pluginRegistry?: PluginRegistry;
   authConfig: AuthConfig;
   authStrategy: AuthStrategy;

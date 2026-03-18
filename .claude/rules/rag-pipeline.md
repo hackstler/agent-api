@@ -5,7 +5,7 @@ El pipeline RAG vive dentro del **plugin RAG**: `src/plugins/rag/pipeline/`.
 No es código suelto en `src/rag/` — está encapsulado en el plugin.
 
 ## Stack obligatorio
-- **Mastra.ai** para orquestación LLM. No usar LangChain JS ni Vercel AI SDK.
+- **Vercel AI SDK** (`ai` package) para orquestación LLM. No usar LangChain JS.
 - **pgvector** para búsqueda vectorial. No usar Pinecone, Weaviate ni otros.
 - **Drizzle ORM** para queries. SQL raw solo en el retriever (operador `<=>` de pgvector).
 

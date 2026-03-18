@@ -112,4 +112,26 @@ export class DrizzleConversationRepository implements ConversationRepository {
       .set({ updatedAt: new Date() })
       .where(eq(conversations.id, data.conversationId));
   }
+
+  async persistUserMessage(conversationId: string, content: string): Promise<void> {
+    await db.insert(messages).values({
+      conversationId,
+      role: "user" as const,
+      content,
+    });
+  }
+
+  async persistAssistantMessage(conversationId: string, content: string, metadata?: import("../../domain/entities/index.js").MessageMetadata): Promise<void> {
+    await db.insert(messages).values({
+      conversationId,
+      role: "assistant" as const,
+      content,
+      metadata: metadata ?? null,
+    });
+
+    await db
+      .update(conversations)
+      .set({ updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId));
+  }
 }

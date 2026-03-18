@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CatalogService } from "../services/catalog.service.js";
 import type { PdfService, CompanyDetails } from "../services/pdf.service.js";
@@ -53,29 +53,13 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
   // Use default strategy for schema and description (at tool creation time)
   const strategy = strategyRegistry.getDefault();
 
-  return createTool({
-    id: "calculateBudget",
+  return tool({
     description: strategy.getToolDescription(),
 
     inputSchema: strategy.getInputSchema(),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      clientName: z.string(),
-      areaM2: z.number(),
-      surfaceType: z.string(),
-      rows: z.array(z.object({
-        grassName: z.string(),
-        pricePerM2: z.number(),
-        totalConIva: z.number(),
-      })),
-      pdfGenerated: z.boolean(),
-      filename: z.string(),
-      error: z.string().optional(),
-    }),
-
-    execute: async ({ clientName, clientAddress, province, areaM2, surfaceType, perimeterLm, sacasAridos, applyVat }, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async ({ clientName, clientAddress, province, areaM2, surfaceType, perimeterLm, sacasAridos, applyVat }, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) {
         return {
           success: false, clientName, areaM2: 0, surfaceType: "",
@@ -146,7 +130,7 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
       });
 
       // Store PDF for controller retrieval (WhatsApp delivery)
-      const pdfRequestId = getAgentContextValue(context, "pdfRequestId");
+      const pdfRequestId = getAgentContextValue({ experimental_context }, "pdfRequestId");
       if (pdfRequestId && pdfBase64) {
         pdfStore.set(pdfRequestId, { pdfBase64, filename });
       }
@@ -157,7 +141,7 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
       }
 
       // Persist quote to DB
-      const userId = getAgentContextValue(context, "userId");
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (userId && orgId) {
         try {
           await quoteRepo.create({

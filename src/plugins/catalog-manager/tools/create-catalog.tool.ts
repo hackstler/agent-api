@@ -1,11 +1,10 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CatalogManager } from "../../../application/managers/catalog.manager.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
 
 export function createCreateCatalogTool(catalogManager: CatalogManager) {
-  return createTool({
-    id: "createCatalog",
+  return tool({
     description: "Create a new catalog for the organization.",
 
     inputSchema: z.object({
@@ -14,19 +13,8 @@ export function createCreateCatalogTool(catalogManager: CatalogManager) {
       isActive: z.boolean().optional().describe("Whether the catalog is active (default true)"),
     }),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      data: z.object({
-        id: z.string(),
-        name: z.string(),
-        effectiveDate: z.string(),
-        isActive: z.boolean(),
-      }).optional(),
-      error: z.string().optional(),
-    }),
-
-    execute: async ({ name, effectiveDate, isActive }, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async ({ name, effectiveDate, isActive }, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) return { success: false, error: "Missing orgId in request context" };
 
       try {
