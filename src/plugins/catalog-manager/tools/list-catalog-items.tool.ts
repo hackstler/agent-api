@@ -1,11 +1,10 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CatalogManager } from "../../../application/managers/catalog.manager.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
 
 export function createListCatalogItemsTool(catalogManager: CatalogManager) {
-  return createTool({
-    id: "listCatalogItems",
+  return tool({
     description:
       "List all items in a specific catalog. Returns code, name, description, price, unit, and category. " +
       "Items with variable pricing (grass types) include a priceRange field with min/max prices per m² " +
@@ -16,29 +15,8 @@ export function createListCatalogItemsTool(catalogManager: CatalogManager) {
       catalogId: z.string().describe("The catalog ID to list items from"),
     }),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      data: z.array(
-        z.object({
-          id: z.string(),
-          code: z.number(),
-          name: z.string(),
-          description: z.string().nullable(),
-          category: z.string().nullable(),
-          pricePerUnit: z.string(),
-          unit: z.string(),
-          isActive: z.boolean(),
-          priceRange: z.object({
-            solado: z.object({ min: z.number(), max: z.number() }).optional(),
-            tierra: z.object({ min: z.number(), max: z.number() }).optional(),
-          }).optional(),
-        })
-      ).optional(),
-      error: z.string().optional(),
-    }),
-
-    execute: async ({ catalogId }, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async ({ catalogId }, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) return { success: false, error: "Missing orgId in request context" };
 
       try {

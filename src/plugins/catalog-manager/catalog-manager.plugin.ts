@@ -1,5 +1,5 @@
 import type { Plugin } from "../plugin.interface.js";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../../agent/types.js";
 import type { CatalogManager } from "../../application/managers/catalog.manager.js";
 import type { CatalogRepository } from "../../domain/ports/repositories/catalog.repository.js";
 import { entityEvents, type EntityEvent } from "../../application/events/entity-events.js";
@@ -18,7 +18,7 @@ export class CatalogManagerPlugin implements Plugin {
   readonly description =
     "Catalog/product management: create catalogs, add/update/delete products and prices, list products.";
   readonly agent;
-  readonly tools: ToolsInput;
+  readonly tools: AgentTools;
 
   private readonly catalogIndexer: CatalogIndexer;
   private readonly debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();

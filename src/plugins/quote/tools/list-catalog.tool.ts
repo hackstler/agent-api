@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CatalogService } from "../services/catalog.service.js";
 import type { QuoteStrategy } from "../strategies/index.js";
@@ -10,27 +10,13 @@ export interface ListCatalogDeps {
 }
 
 export function createListCatalogTool({ catalogService, strategy }: ListCatalogDeps) {
-  return createTool({
-    id: "listCatalog",
+  return tool({
     description: strategy.getListCatalogDescription(),
 
     inputSchema: z.object({}),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      catalogName: z.string(),
-      grassTypes: z.array(z.object({
-        code: z.number(),
-        name: z.string(),
-        description: z.string().nullable(),
-        unit: z.string(),
-      })),
-      note: z.string(),
-      error: z.string().optional(),
-    }),
-
-    execute: async (_input, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async (_input, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) {
         return {
           success: false,

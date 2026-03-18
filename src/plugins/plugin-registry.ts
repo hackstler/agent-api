@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../agent/types.js";
 import type { Plugin } from "./plugin.interface.js";
 import { createDelegationTools } from "../agent/delegation.js";
 
@@ -26,15 +26,15 @@ export class PluginRegistry {
     return Array.from(this.plugins.values());
   }
 
-  getAllTools(): ToolsInput {
-    const tools: ToolsInput = {};
+  getAllTools(): AgentTools {
+    const tools: AgentTools = {};
     for (const plugin of this.plugins.values()) {
       Object.assign(tools, plugin.tools);
     }
     return tools;
   }
 
-  getDelegationTools(): ToolsInput {
+  getDelegationTools(): AgentTools {
     return createDelegationTools(this.getAll());
   }
 

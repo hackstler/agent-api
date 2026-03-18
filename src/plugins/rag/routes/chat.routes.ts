@@ -1,12 +1,16 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import type { Agent } from "@mastra/core/agent";
+import type { AgentRunner } from "../../../agent/agent-runner.js";
+import type { DelegationResult } from "../../../agent/types.js";
+import { extractToolSummaries, summarizeToolCall } from "../../../agent/tool-summaries.js";
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "../../../api/helpers/extract-sources.js";
-import { buildAgentOptions } from "../../../application/agent-context.js";
+import { createAgentContext } from "../../../application/agent-context.js";
+import { loadConversationHistory } from "../../../agent/load-history.js";
 import type { ConversationManager } from "../../../application/managers/conversation.manager.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
+import type { ToolCallSummary } from "../../../domain/entities/index.js";
 
 const chatSchema = z.object({
   query: z.string().min(1).max(10_000),
@@ -15,9 +19,9 @@ const chatSchema = z.object({
 });
 
 /**
- * Factory: creates chat routes bound to a specific RAG agent instance.
+ * Factory: creates chat routes bound to a specific agent instance.
  */
-export function createChatRoutes(agent: Agent, convManager: ConversationManager, attachmentStore?: AttachmentStore): Hono {
+export function createChatRoutes(agent: AgentRunner, convManager: ConversationManager, attachmentStore?: AttachmentStore): Hono {
   const chat = new Hono();
 
   /**
@@ -38,15 +42,18 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
     const userId = c.get("user")?.userId;
     const conversationId = await resolveConversationId(parsed.data.conversationId, convManager, userId, query);
 
-    const agentOptions = buildAgentOptions({ userId: userId ?? "anonymous", orgId, conversationId });
+    const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId });
+    const history = await loadConversationHistory(convManager, conversationId, 20);
 
-    const result = await agent.generate(query, agentOptions);
+    const result = await agent.generate({ prompt: query, messages: history, experimental_context });
 
-    const sources = extractSources(result.steps ?? []);
+    const sources = extractSources(result.steps);
+    const toolSummaries = extractToolSummaries(result.steps);
 
     await convManager.persistMessages(conversationId, query, result.text, {
       model: ragConfig.llmModel,
       retrievedChunks: sources.map((s) => s.id),
+      toolCalls: toolSummaries,
     });
 
     return c.json({
@@ -62,14 +69,12 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
 
   /**
    * GET /chat/stream?query=...&conversationId=...
-   * SSE streaming using Mastra's native chunk types.
+   * SSE streaming.
    *
    * Events emitted:
    *   tool-call        → agent is about to call a tool
    *   tool-result      → tool finished (only for specific tools like searchDocuments)
    *   tool-error       → tool failed
-   *   agent-start      → coordinator delegated to a sub-agent
-   *   agent-end        → sub-agent finished
    *   step-start       → LLM step started
    *   step-finish      → LLM step completed
    *   sources          → RAG sources extracted from searchDocuments
@@ -110,53 +115,96 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
       let fullAnswer = "";
       let sourcesEmitted = false;
       const collectedSources: Array<{ id: string; documentTitle: string; documentSource: string; score: number; excerpt: string }> = [];
+      const collectedToolSummaries: ToolCallSummary[] = [];
 
       /** Helper: emit an SSE event */
       const emit = (data: Record<string, unknown>) =>
         streamWriter.write(`data: ${JSON.stringify(data)}\n\n`);
 
       try {
-        const agentOptions = buildAgentOptions({
+        const experimental_context = createAgentContext({
           userId: userId ?? "anonymous",
           orgId,
           conversationId,
-          onFinish: async ({ text }) => {
-            // Persist messages via hook — runs after stream completes
-            if (text) {
-              try {
-                await convManager.persistMessages(conversationId, parsed.data.query, text, {
-                  model: ragConfig.llmModel,
-                  retrievedChunks: collectedSources.map((s) => s.id),
-                });
+        });
+        const history = await loadConversationHistory(convManager, conversationId, 20);
 
-              } catch (err) {
-                console.error("[chat/stream] failed to persist messages:", err instanceof Error ? err.message : err);
-              }
-            }
-          },
+        // Persist user message BEFORE streaming — survives stream failures
+        try {
+          await convManager.persistUserMessage(conversationId, parsed.data.query);
+        } catch (err) {
+          console.error("[chat/stream] failed to persist user message:", err instanceof Error ? err.message : err);
+        }
+
+        const agentStream = await agent.stream({
+          prompt: parsed.data.query,
+          messages: history,
+          experimental_context,
         });
 
-        const agentStream = await agent.stream(parsed.data.query, agentOptions);
-
         for await (const chunk of agentStream.fullStream) {
-          const payload = (chunk as { payload?: Record<string, unknown> }).payload ?? {};
-
           switch (chunk.type) {
             // ── Tool lifecycle ──────────────────────────────────────
             case "tool-call": {
-              const toolName = payload["toolName"] as string | undefined;
+              const toolName = (chunk as { toolName?: string }).toolName;
               if (toolName) {
-                await emit({ type: "tool-call", toolName });
+                // Delegation tools → emit agent-start for frontend activity indicators
+                if (toolName.startsWith("delegateTo_")) {
+                  const agentId = "agent-" + toolName.replace("delegateTo_", "");
+                  await emit({ type: "agent-start", agentId });
+                } else {
+                  await emit({ type: "tool-call", toolName });
+                }
               }
               break;
             }
 
             case "tool-result": {
-              const toolName = payload["toolName"] as string | undefined;
+              const toolName = (chunk as { toolName?: string }).toolName;
+              const result = (chunk as { result?: unknown }).result;
 
-              // Extract RAG sources from searchDocuments
+              // Collect tool summaries for persistence (cross-turn memory)
+              if (toolName) {
+                collectedToolSummaries.push({
+                  toolName,
+                  summary: summarizeToolCall({ toolName, result }),
+                });
+              }
+
+              // Delegation tool results → emit agent-end + extract nested sources/attachments
+              if (toolName?.startsWith("delegateTo_")) {
+                const agentId = "agent-" + toolName.replace("delegateTo_", "");
+                await emit({ type: "agent-end", agentId });
+
+                // Extract sources from nested RAG delegation — uses typed DelegationResult
+                if (!sourcesEmitted) {
+                  const delegation = result as DelegationResult | undefined;
+                  const ragResults = delegation?.toolResults?.filter((tr) => tr.toolName === "searchDocuments") ?? [];
+                  for (const sr of ragResults) {
+                    const res = sr.result as {
+                      chunks?: Array<{ id: string; content: string; documentTitle: string; documentSource: string; score: number }>;
+                    } | undefined;
+                    const chunks = res?.chunks ?? [];
+                    collectedSources.push(
+                      ...chunks.map((ch) => ({
+                        id: ch.id,
+                        documentTitle: ch.documentTitle,
+                        documentSource: ch.documentSource ?? "",
+                        score: ch.score,
+                        excerpt: ch.content?.slice(0, 200) + (ch.content?.length > 200 ? "…" : ""),
+                      }))
+                    );
+                  }
+                  if (collectedSources.length > 0) {
+                    await emit({ type: "sources", chunks: collectedSources });
+                    sourcesEmitted = true;
+                  }
+                }
+              }
+
+              // Direct tool sources (searchDocuments called directly, not via delegation)
               if (toolName === "searchDocuments" && !sourcesEmitted) {
-                const res = payload["result"] as {
+                const res = result as {
                   chunks?: Array<{ id: string; content: string; documentTitle: string; documentSource: string; score: number }>;
                 } | undefined;
                 const chunks = res?.chunks ?? [];
@@ -175,7 +223,7 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
 
               // Extract PDF attachments (may be nested inside sub-agent delegation)
               if (attachmentStore) {
-                const filename = findPdfFilename(payload["result"]);
+                const filename = findPdfFilename(result);
                 if (filename) {
                   const stored = attachmentStore.retrieve(filename);
                   if (stored) {
@@ -187,27 +235,27 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
             }
 
             case "tool-error": {
-              const toolName = payload["toolName"] as string | undefined;
-              const error = payload["error"] as string | undefined;
+              const toolName = (chunk as { toolName?: string }).toolName;
+              const error = (chunk as { error?: string }).error;
               await emit({ type: "tool-error", toolName: toolName ?? "unknown", error: error ?? "Unknown tool error" });
               break;
             }
 
             // ── LLM steps ──────────────────────────────────────────
-            case "step-start": {
+            case "start-step": {
               await emit({ type: "step-start" });
               break;
             }
 
-            case "step-finish": {
-              const finishReason = payload["finishReason"] as string | undefined;
+            case "finish-step": {
+              const finishReason = (chunk as { finishReason?: string }).finishReason;
               await emit({ type: "step-finish", finishReason: finishReason ?? "unknown" });
               break;
             }
 
             // ── Text output ────────────────────────────────────────
             case "text-delta": {
-              const text = (payload["text"] as string | undefined) ?? "";
+              const text = (chunk as { text?: string }).text ?? "";
               if (text) {
                 fullAnswer += text;
                 await emit({ type: "text", text });
@@ -215,20 +263,26 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
               break;
             }
 
-            // ── Error from LLM / Mastra ─────────────────────────
+            // ── Error from LLM ─────────────────────────────────
             case "error": {
-              const error = payload["error"] ?? chunk;
+              const error = chunk;
               console.error("[chat/stream] error chunk from agent:", JSON.stringify(error, null, 2));
               await emit({ type: "error", message: String((error as Record<string, unknown>)?.["message"] ?? error) });
               break;
             }
 
-            // Other chunk types (reasoning, object, etc.) — log for diagnostics
-            default:
-              if (chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-start" && chunk.type !== "reasoning-end") {
+            // Other chunk types (reasoning, text-start, text-end, etc.) — ignore silently
+            default: {
+              const ignoredTypes = new Set([
+                "reasoning-delta", "reasoning-start", "reasoning-end",
+                "text-start", "text-end",
+                "tool-input-start", "tool-input-delta",
+              ]);
+              if (!ignoredTypes.has(chunk.type)) {
                 console.debug(`[chat/stream] unhandled chunk type: ${chunk.type}`);
               }
               break;
+            }
           }
         }
 
@@ -236,10 +290,17 @@ export function createChatRoutes(agent: Agent, convManager: ConversationManager,
           await emit({ type: "sources", chunks: [] });
         }
 
-        // Fallback persistence if onFinish didn't fire (e.g. empty response)
-        // onFinish should handle this, but belt-and-suspenders for reliability
-        if (!fullAnswer) {
-          // No text generated — nothing to persist
+        // Persist assistant message after stream completes (user message already saved)
+        if (fullAnswer) {
+          try {
+            await convManager.persistAssistantMessage(conversationId, fullAnswer, {
+              model: ragConfig.llmModel,
+              retrievedChunks: collectedSources.map((s) => s.id),
+              toolCalls: collectedToolSummaries,
+            });
+          } catch (err) {
+            console.error("[chat/stream] failed to persist assistant message:", err instanceof Error ? err.message : err);
+          }
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Internal error";

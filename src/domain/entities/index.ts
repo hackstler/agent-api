@@ -14,15 +14,8 @@ export interface AgentContextParams {
   orgId: string;
   conversationId: string;
   pdfRequestId?: string;
-  /** Mastra hook: fires after the entire agent execution completes. */
+  /** Hook: fires after the entire agent execution completes. */
   onFinish?: (event: any) => void | Promise<void>;
-  /** Mastra hook: fires after each LLM step completes. */
-  onStepFinish?: (event: any) => void | Promise<void>;
-  /** Mastra delegation hooks for sub-agent orchestration. */
-  delegation?: {
-    onDelegationStart?: (context: any) => void | Promise<void>;
-    onDelegationComplete?: (context: any) => void | Promise<void>;
-  };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -82,12 +75,18 @@ export interface NewConversation {
 
 // ── Message ─────────────────────────────────────────────────────────────────────
 
+export interface ToolCallSummary {
+  toolName: string;
+  summary: string;
+}
+
 export interface MessageMetadata {
   tokens?: number;
   latencyMs?: number;
   costUsd?: number;
   retrievedChunks?: string[];
   model?: string;
+  toolCalls?: ToolCallSummary[];
 }
 
 export interface Message {

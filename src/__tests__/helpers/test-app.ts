@@ -73,7 +73,7 @@ export interface TestContext {
     topic: TopicManager;
     org: OrganizationManager;
   };
-  mockAgent: { generate: ReturnType<typeof vi.fn> };
+  mockAgent: { generate: ReturnType<typeof vi.fn>; stream: ReturnType<typeof vi.fn> };
 }
 
 export function createTestApp(): TestContext {
@@ -103,6 +103,7 @@ export function createTestApp(): TestContext {
 
   const mockAgent = {
     generate: vi.fn(),
+    stream: vi.fn(),
   };
 
   const testAuthConfig: AuthConfig = {

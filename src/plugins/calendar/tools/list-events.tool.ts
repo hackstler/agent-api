@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CalendarApiService } from "../services/calendar-api.service.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
@@ -8,8 +8,7 @@ export interface ListEventsDeps {
 }
 
 export function createListEventsTool({ calendarService }: ListEventsDeps) {
-  return createTool({
-    id: "listCalendarEvents",
+  return tool({
     description:
       "List upcoming events from the user's Google Calendar. Requires the user's Google account to be connected.",
 
@@ -27,22 +26,8 @@ export function createListEventsTool({ calendarService }: ListEventsDeps) {
         .describe("Maximum number of events to return (default: 10)"),
     }),
 
-    outputSchema: z.object({
-      events: z.array(
-        z.object({
-          id: z.string(),
-          summary: z.string(),
-          start: z.string(),
-          end: z.string(),
-          location: z.string(),
-          attendees: z.array(z.string()),
-        }),
-      ),
-      totalResults: z.number(),
-    }),
-
-    execute: async ({ timeMin, timeMax, maxResults }, context) => {
-      const userId = getAgentContextValue(context, "userId");
+    execute: async ({ timeMin, timeMax, maxResults }, { experimental_context }) => {
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error('Missing userId in request context');
       const events = await calendarService.listEvents(userId, timeMin, timeMax, maxResults ?? 10);
       return {

@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { ToolEntry } from "./base.js";
 import type { LoadedDocument } from "../ingestion/loader.js";
@@ -17,8 +17,7 @@ export const saveNoteEntry: ToolEntry = {
 };
 
 export function createSaveNoteTool() {
-  return createTool({
-    id: "save-note",
+  return tool({
     description: `Save one or multiple URLs / notes to the knowledge base so they can be searched later.
 Use this when the user:
   - Shares one or more URLs (YouTube, web pages) to save/remember — pass them all at once in the array
@@ -32,19 +31,8 @@ For a list of URLs, pass ALL of them in the 'items' array in a single call — d
         .min(1)
         .describe("One or more URLs to ingest OR plain-text notes to save"),
     }),
-    outputSchema: z.object({
-      saved: z.number(),
-      failed: z.number(),
-      results: z.array(z.object({
-        item: z.string(),
-        success: z.boolean(),
-        title: z.string().optional(),
-        chunkCount: z.number().optional(),
-        error: z.string().optional(),
-      })),
-    }),
-    execute: async ({ items }, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async ({ items }, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) throw new Error('Missing orgId in request context');
       const { loadDocument } = await import("../ingestion/loader.js");
       const { processDocument } = await import("../ingestion/processor.js");

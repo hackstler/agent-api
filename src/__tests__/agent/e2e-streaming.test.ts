@@ -110,8 +110,8 @@ describe.skipIf(!HAS_API_KEY)("E2E SSE Streaming — flujo HTTP completo", () =>
 
     const eventTypes = events.map((e) => e.type);
 
-    // Debe incluir tool-call events (coordinator llama a agent-quote)
-    expect(eventTypes).toContain("tool-call");
+    // Debe incluir agent-start events (coordinator delegates to agent-quote)
+    expect(eventTypes).toContain("agent-start");
 
     // Debe terminar con done
     expect(eventTypes[eventTypes.length - 1]).toBe("done");

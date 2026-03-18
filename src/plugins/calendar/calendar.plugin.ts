@@ -1,5 +1,5 @@
 import type { Plugin } from "../plugin.interface.js";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../../agent/types.js";
 import type { OAuthTokenProvider } from "../google-common/oauth-token-provider.js";
 import { CalendarApiService } from "./services/calendar-api.service.js";
 import { createListEventsTool } from "./tools/list-events.tool.js";
@@ -13,7 +13,7 @@ export class CalendarPlugin implements Plugin {
   readonly name = "Calendar Plugin";
   readonly description = "List, create, update, and delete events in Google Calendar.";
   readonly agent;
-  readonly tools: ToolsInput;
+  readonly tools: AgentTools;
 
   constructor(tokenProvider: OAuthTokenProvider) {
     const service = new CalendarApiService(tokenProvider);

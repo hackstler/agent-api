@@ -1,51 +1,37 @@
-import { RequestContext } from "@mastra/core/request-context";
+import type { AgentContext } from "../agent/types.js";
 import type { AgentContextParams, AgentContextKey } from "../domain/entities/index.js";
 
 /**
- * Creates a Mastra RequestContext from typed params.
- * Single source of truth for context construction — eliminates ad-hoc
- * `new RequestContext([...])` scattered across controllers and routes.
+ * Builds an AgentContext object for passing to tools via experimental_context.
  */
-export function createAgentContext(params: AgentContextParams): RequestContext {
-  const entries: [string, string][] = [
-    ["userId", params.userId],
-    ["orgId", params.orgId],
-    ["conversationId", params.conversationId],
-  ];
-
-  if (params.pdfRequestId) {
-    entries.push(["pdfRequestId", params.pdfRequestId]);
-  }
-
-  return new RequestContext(entries);
-}
-
-/**
- * Builds the full options object for `agent.generate()` / `agent.stream()`.
- * Encapsulates the coupling between RequestContext keys and Mastra memory params.
- *
- * Supports Mastra hooks (onFinish, onStepFinish, delegation) when provided
- * in params — the route handler passes them in, buildAgentOptions passes them through.
- */
-export function buildAgentOptions(params: AgentContextParams) {
+export function createAgentContext(params: AgentContextParams): AgentContext {
   return {
-    requestContext: createAgentContext(params),
-    memory: { thread: params.conversationId, resource: params.userId },
-    maxSteps: 30,
-    // Mastra hooks — only included if provided by the caller
-    ...(params.onFinish && { onFinish: params.onFinish }),
-    ...(params.onStepFinish && { onStepFinish: params.onStepFinish }),
-    ...(params.delegation && { delegation: params.delegation }),
+    userId: params.userId,
+    orgId: params.orgId,
+    conversationId: params.conversationId,
+    ...(params.pdfRequestId ? { pdfRequestId: params.pdfRequestId } : {}),
   };
 }
 
 /**
- * Type-safe extraction of a value from Mastra's tool execution context.
- * Replaces fragile `context?.requestContext?.get("key") as string` casts.
+ * Builds options for AgentRunner.generate() / stream().
+ */
+export function buildAgentOptions(params: AgentContextParams) {
+  return {
+    experimental_context: createAgentContext(params),
+    maxSteps: 30,
+    ...(params.onFinish && { onFinish: params.onFinish }),
+  };
+}
+
+/**
+ * Type-safe extraction of a value from tool execution context.
  */
 export function getAgentContextValue(
-  context: { requestContext?: { get(key: string): unknown } } | undefined,
+  context: { experimental_context?: unknown } | undefined,
   key: AgentContextKey,
 ): string | undefined {
-  return context?.requestContext?.get(key) as string | undefined;
+  if (!context?.experimental_context) return undefined;
+  const ctx = context.experimental_context as Record<string, unknown>;
+  return ctx[key] as string | undefined;
 }

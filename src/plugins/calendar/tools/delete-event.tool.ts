@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CalendarApiService } from "../services/calendar-api.service.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
@@ -8,8 +8,7 @@ export interface DeleteEventDeps {
 }
 
 export function createDeleteEventTool({ calendarService }: DeleteEventDeps) {
-  return createTool({
-    id: "deleteCalendarEvent",
+  return tool({
     description:
       "Delete an event from the user's Google Calendar. This action is irreversible.",
 
@@ -17,13 +16,8 @@ export function createDeleteEventTool({ calendarService }: DeleteEventDeps) {
       eventId: z.string().describe("ID of the calendar event to delete"),
     }),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      deletedEventId: z.string(),
-    }),
-
-    execute: async ({ eventId }, context) => {
-      const userId = getAgentContextValue(context, "userId");
+    execute: async ({ eventId }, { experimental_context }) => {
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error('Missing userId in request context');
       const result = await calendarService.deleteEvent(userId, eventId);
       return result;

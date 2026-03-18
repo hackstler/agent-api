@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { ToolEntry } from "./base.js";
 
@@ -13,24 +13,12 @@ export const searchWebEntry: ToolEntry = {
 };
 
 export function createSearchWebTool() {
-  return createTool({
-    id: "search-web",
+  return tool({
     description: `Search the web for information NOT found in the knowledge base.
 ONLY use this as a fallback when searchDocuments returns 0 results AND the user needs current information.
 Always tell the user when the answer comes from a web search, not from their documents.`,
     inputSchema: z.object({
       query: z.string().describe("The search query"),
-    }),
-    outputSchema: z.object({
-      results: z.array(
-        z.object({
-          title: z.string(),
-          snippet: z.string(),
-          url: z.string(),
-        })
-      ),
-      source: z.literal("web"),
-      available: z.boolean(),
     }),
     execute: async ({ query }) => {
       const apiKey = process.env["PERPLEXITY_API_KEY"];

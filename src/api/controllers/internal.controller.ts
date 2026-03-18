@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import type { Agent } from "@mastra/core/agent";
+import type { AgentRunner } from "../../agent/agent-runner.js";
+import type { AgentStep, AgentGenerateResult, DelegationResult } from "../../agent/types.js";
+import { extractToolSummaries } from "../../agent/tool-summaries.js";
 import type { WhatsAppManager } from "../../application/managers/whatsapp.manager.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
-import { buildAgentOptions } from "../../application/agent-context.js";
+import { createAgentContext } from "../../application/agent-context.js";
+import { loadConversationHistory } from "../../agent/load-history.js";
 import { extractSources } from "../helpers/extract-sources.js";
 import { formatForWhatsApp, buildSourcesFooter } from "../helpers/format-whatsapp.js";
 import { ragConfig } from "../../plugins/rag/config/rag.config.js";
@@ -41,26 +44,19 @@ const messageSchema = z.object({
 
 /**
  * Unwraps nested toolResults from delegation steps.
+ * When the coordinator delegates to a sub-agent, the sub-agent's tool results
+ * are nested inside the delegation result. This flattens them for extractSources().
  */
-function unwrapDelegationSteps(
-  steps: Array<{ toolResults?: Array<unknown> }>
-): Array<{ toolResults?: Array<unknown> }> {
-  const unwrapped: Array<{ toolResults?: Array<unknown> }> = [];
+function unwrapDelegationSteps(steps: AgentStep[]): AgentStep[] {
+  const unwrapped: AgentStep[] = [];
 
   for (const step of steps) {
-    const allToolResults = step.toolResults ?? [];
-
-    const delegationResult = allToolResults.find((r) => {
-      const payload = (r as { payload?: { toolName?: string } }).payload;
-      const name = payload?.toolName ?? "";
-      return name.startsWith("delegate-to-") || name.startsWith("delegateTo_");
-    });
+    const delegationResult = step.toolResults.find(
+      (r) => r.toolName.startsWith("delegateTo_"),
+    );
 
     if (delegationResult) {
-      const payload = (delegationResult as {
-        payload: { result?: { toolResults?: Array<unknown> } };
-      }).payload;
-      const nested = payload.result?.toolResults ?? [];
+      const nested = (delegationResult.result as DelegationResult | undefined)?.toolResults ?? [];
       if (nested.length > 0) {
         unwrapped.push({ toolResults: nested });
       }
@@ -75,7 +71,7 @@ function unwrapDelegationSteps(
 export function createInternalController(
   waManager: WhatsAppManager,
   convManager: ConversationManager,
-  agent: Agent,
+  agent: AgentRunner,
 ): Hono {
   const router = new Hono();
 
@@ -132,43 +128,47 @@ export function createInternalController(
       );
 
       const pdfRequestId = randomUUID();
-      const agentOptions = buildAgentOptions({ userId, orgId, conversationId, pdfRequestId });
+      const experimental_context = createAgentContext({ userId, orgId, conversationId, pdfRequestId });
+      const history = await loadConversationHistory(convManager, conversationId, 20);
 
-      let result: Awaited<ReturnType<typeof agent.generate>> | undefined;
+      let result: AgentGenerateResult | undefined;
       let replyText = "";
       const MAX_ATTEMPTS = 3;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        result = await agent.generate(messageBody, agentOptions);
+        result = await agent.generate({
+          prompt: messageBody,
+          messages: history,
+          experimental_context,
+        });
         replyText = result.text?.trim() ?? "";
 
         if (replyText) break;
 
-        const raw = result as Record<string, unknown>;
         console.warn(`[internal/message] empty response attempt ${attempt}/${MAX_ATTEMPTS}`, {
           userId,
-          finishReason: raw["finishReason"],
-          runId: raw["runId"],
-          stepsCount: result.steps?.length ?? 0,
-          textLength: result.text?.length ?? 0,
+          stepsCount: result.steps.length,
+          textLength: result.text.length,
         });
       }
 
-      if (!replyText) {
+      if (!replyText || !result) {
         console.error("[internal/message] agent returned empty response after all retries", { userId });
         return c.json({
           data: { reply: "Lo siento, no pude procesar tu solicitud. Por favor, inténtalo de nuevo." },
         });
       }
 
-      const steps = unwrapDelegationSteps(result!.steps ?? []);
+      const steps = unwrapDelegationSteps(result.steps);
       const sources = extractSources(steps);
+      const toolSummaries = extractToolSummaries(result.steps);
 
       // Persist messages separately — don't let a DB error kill the reply
       try {
         await convManager.persistMessages(conversationId, messageBody, replyText, {
           model: ragConfig.llmModel,
           retrievedChunks: sources.map((s) => s.id),
+          toolCalls: toolSummaries,
         });
       } catch (persistError) {
         console.error("[internal/message] failed to persist messages:", persistError);
@@ -176,9 +176,7 @@ export function createInternalController(
 
       const waText = formatForWhatsApp(replyText) + buildSourcesFooter(sources);
 
-      // PDF retrieval: keyed by pdfRequestId (UUID) via RequestContext.
-      // Same propagation channel as orgId (proven to work through delegation).
-      // Deterministic and concurrent-safe — each request has its own UUID.
+      // PDF retrieval: keyed by pdfRequestId (UUID) via experimental_context.
       let document: DocumentAttachment | null = null;
       const storeEntry = pdfStore.take(pdfRequestId);
       if (storeEntry) {

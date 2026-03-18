@@ -25,10 +25,10 @@ vi.mock("../../../infrastructure/db/client.js", () => ({
 }));
 
 // ── Imports (resolved after mocks) ──────────────────────────────────────────
-import { Agent } from "@mastra/core/agent";
-import type { ToolsInput } from "@mastra/core/agent";
+import { tool } from "ai";
+import type { AgentTools } from "../../../agent/types.js";
+import { AgentRunner } from "../../../agent/agent-runner.js";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 
 import { createApp, type AppDependencies } from "../../../app.js";
@@ -55,6 +55,9 @@ import { createChatRoutes } from "../../../plugins/rag/routes/chat.routes.js";
 // Agent context
 import { getAgentContextValue } from "../../../application/agent-context.js";
 import { ragConfig } from "../../../plugins/rag/config/rag.config.js";
+
+// Delegation tools
+import { createDelegationTools } from "../../../agent/delegation.js";
 
 import {
   createMockUserRepo,
@@ -218,7 +221,7 @@ function createTestQuotePlugin(mocks: {
     strategy: defaultStrategy,
   });
 
-  const tools: ToolsInput = { calculateBudget, listCatalog };
+  const tools: AgentTools = { calculateBudget, listCatalog };
   const agent = createQuoteAgent(tools, defaultStrategy);
 
   return {
@@ -230,20 +233,12 @@ function createTestQuotePlugin(mocks: {
   };
 }
 
-function createTestRagPlugin(coordinatorAgent: Agent, convManager: ConversationManager, attachmentStore: InMemoryAttachmentStore): Plugin {
-  const searchDocuments = createTool({
-    id: "search-documents",
+function createTestRagPlugin(coordinatorAgent: AgentRunner, convManager: ConversationManager, attachmentStore: InMemoryAttachmentStore): Plugin {
+  const searchDocuments = tool({
     description: "Search the knowledge base for relevant document chunks using semantic similarity.",
     inputSchema: z.object({
       query: z.string(), topK: z.number().optional(),
       documentIds: z.array(z.string()).optional(), topicId: z.string().optional(),
-    }),
-    outputSchema: z.object({
-      chunks: z.array(z.object({
-        id: z.string(), content: z.string(), score: z.number(),
-        documentTitle: z.string(), documentSource: z.string(),
-      })),
-      chunkCount: z.number(),
     }),
     execute: async ({ query }) => {
       const lower = query.toLowerCase();
@@ -257,23 +252,18 @@ function createTestRagPlugin(coordinatorAgent: Agent, convManager: ConversationM
     },
   });
 
-  const saveNote = createTool({
-    id: "save-note",
+  const saveNote = tool({
     description: "Save a note or document to the knowledge base.",
     inputSchema: z.object({ title: z.string(), content: z.string() }),
-    outputSchema: z.object({ success: z.boolean(), documentId: z.string() }),
     execute: async () => ({ success: true, documentId: "doc-saved-001" }),
   });
 
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   const google = createGoogleGenerativeAI({ apiKey: apiKey! });
 
-  const tools: ToolsInput = { searchDocuments, saveNote };
-  const ragAgent = new Agent({
-    id: ragConfig.agentName,
-    name: ragConfig.agentName,
-    description: "Retrieval-Augmented Generation with hybrid search, ingestion, and chat",
-    instructions: `You are ${ragConfig.agentName}. ${ragConfig.agentDescription}
+  const tools: AgentTools = { searchDocuments, saveNote };
+  const ragAgent = new AgentRunner({
+    system: `You are ${ragConfig.agentName}. ${ragConfig.agentDescription}
 You assist SELLERS, NOT end customers.
 1. For questions about products/installation/maintenance, call searchDocuments first.
 2. Base ALL responses on tool results. Never hallucinate.
@@ -292,7 +282,7 @@ You assist SELLERS, NOT end customers.
     // PRODUCTION ROUTES — createChatRoutes es la misma función que usa producción
     routes: () => {
       const app = new Hono();
-      app.route("/chat", createChatRoutes(coordinatorAgent, convManager, undefined, attachmentStore));
+      app.route("/chat", createChatRoutes(coordinatorAgent, convManager, attachmentStore));
       return app;
     },
   };
@@ -302,26 +292,18 @@ function createTestCatalogManagerPlugin(): Plugin {
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   const google = createGoogleGenerativeAI({ apiKey: apiKey! });
 
-  const listCatalogs = createTool({
-    id: "listCatalogs",
+  const listCatalogs = tool({
     description: "List all catalogs for the current organization.",
     inputSchema: z.object({}),
-    outputSchema: z.object({
-      catalogs: z.array(z.object({ id: z.string(), name: z.string(), isActive: z.boolean(), itemCount: z.number() })),
-    }),
-    execute: async (_input, context) => {
-      const orgId = getAgentContextValue(context, "orgId");
+    execute: async (_input, { experimental_context }) => {
+      const orgId = getAgentContextValue({ experimental_context }, "orgId");
       return { catalogs: [{ id: TEST_CATALOG_ID, name: `Catálogo ${orgId}`, isActive: true, itemCount: 8 }] };
     },
   });
 
-  const listCatalogItems = createTool({
-    id: "listCatalogItems",
+  const listCatalogItems = tool({
     description: "List all items/products in a specific catalog with their prices.",
     inputSchema: z.object({ catalogId: z.string() }),
-    outputSchema: z.object({
-      items: z.array(z.object({ code: z.number(), name: z.string(), description: z.string().nullable(), pricePerUnit: z.number(), unit: z.string() })),
-    }),
     execute: async () => ({
       items: TEST_GRASS_PRICES.map((gp, i) => ({
         code: i + 1, name: gp.grassName, description: `Césped artificial ${gp.grassName}`,
@@ -330,12 +312,9 @@ function createTestCatalogManagerPlugin(): Plugin {
     }),
   });
 
-  const tools: ToolsInput = { listCatalogs, listCatalogItems };
-  const agent = new Agent({
-    id: "catalog-manager",
-    name: "Catalog Manager",
-    description: "Gestiona catálogos de productos: consultar, crear, editar, listar productos y precios.",
-    instructions: `Eres un especialista en gestión de catálogos de césped artificial.
+  const tools: AgentTools = { listCatalogs, listCatalogItems };
+  const agent = new AgentRunner({
+    system: `Eres un especialista en gestión de catálogos de césped artificial.
 1. SIEMPRE llama a listCatalogs PRIMERO.
 2. Para consultas de productos/precios, llama a listCatalogItems.
 3. Muestra precios con símbolo de moneda.
@@ -353,22 +332,20 @@ Responde SIEMPRE en español.`,
   };
 }
 
-// ── Coordinator (sin memory — tests no necesitan persistencia entre llamadas) ──
+// ── Coordinator (uses delegation tools — same pattern as production) ──
 
-function createTestCoordinator(registry: PluginRegistry): Agent {
+function createTestCoordinator(registry: PluginRegistry): AgentRunner {
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   const google = createGoogleGenerativeAI({ apiKey: apiKey! });
 
-  const agents = registry.getAgentMap();
+  const tools = createDelegationTools(registry.getAll());
   const isSpanish = ragConfig.responseLanguage === "es";
   const pluginList = registry.getAll()
-    .map((p) => `- agent-${p.id}: ${p.name} — ${p.description}`)
+    .map((p) => `- delegateTo_${p.id}: ${p.name} — ${p.description}`)
     .join("\n");
 
-  return new Agent({
-    id: "coordinator",
-    name: ragConfig.agentName,
-    instructions: `You are ${ragConfig.agentName}, a personal assistant for salespeople.
+  return new AgentRunner({
+    system: `You are ${ragConfig.agentName}, a personal assistant for salespeople.
 
 == IDENTITY ==
 Your name is ${ragConfig.agentName}. ${ragConfig.agentDescription}
@@ -378,23 +355,23 @@ You assist SELLERS (vendedores), NOT end customers.
 ${pluginList}
 
 == INTENT DISAMBIGUATION ==
-- Price lookups ("¿cuánto cuesta X?", "precio de X") → agent-catalog-manager
-- Quote generation ("hazme un presupuesto", "presupuesto para cliente X") → agent-quote
-- Catalog browsing ("¿qué productos tenemos?") → agent-catalog-manager
-- Knowledge questions → agent-rag
+- Price lookups ("¿cuánto cuesta X?", "precio de X") → delegateTo_catalog-manager
+- Quote generation ("hazme un presupuesto", "presupuesto para cliente X") → delegateTo_quote
+- Catalog browsing ("¿qué productos tenemos?") → delegateTo_catalog-manager
+- Knowledge questions → delegateTo_rag
 
 Rules:
 1. For pure greetings → respond directly WITHOUT delegating.
-2. For price/catalog queries → delegate to agent-catalog-manager.
-3. For quote generation → delegate to agent-quote.
-4. For knowledge questions → delegate to agent-rag.
+2. For price/catalog queries → delegate to delegateTo_catalog-manager.
+3. For quote generation → delegate to delegateTo_quote.
+4. For knowledge questions → delegate to delegateTo_rag.
 5. Pass the user's EXACT message. Return agent's response as-is.
 
 == RESPONSE RULES ==
 1. Always respond in ${isSpanish ? "Spanish" : ragConfig.responseLanguage}.
 2. Base ALL responses on tool results.`,
     model: google("gemini-2.5-flash"),
-    agents,
+    tools,
   });
 }
 
@@ -469,7 +446,7 @@ export function createE2ETestApp(): E2ETestContext {
   registry.register(quotePlugin);
   registry.register(createTestCatalogManagerPlugin());
 
-  // 6. Coordinator: real Gemini, orquesta todos los plugins
+  // 6. Coordinator: real Gemini, orquesta todos los plugins via delegation tools
   const coordinatorAgent = createTestCoordinator(registry);
 
   // 7. RAG plugin: tiene las routes /chat y /chat/stream — PRODUCCIÓN

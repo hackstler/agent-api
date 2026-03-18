@@ -1,9 +1,9 @@
-import { Agent } from "@mastra/core/agent";
-import type { ToolsInput } from "@mastra/core/agent";
+import { AgentRunner } from "../../agent/agent-runner.js";
+import type { AgentTools } from "../../agent/types.js";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { ragConfig } from "../rag/config/rag.config.js";
 
-export function createCatalogManagerAgent(tools: ToolsInput): Agent {
+export function createCatalogManagerAgent(tools: AgentTools): AgentRunner {
   const apiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   if (!apiKey) {
     throw new Error("Missing GOOGLE_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY for CatalogManagerAgent");
@@ -12,11 +12,8 @@ export function createCatalogManagerAgent(tools: ToolsInput): Agent {
   const google = createGoogleGenerativeAI({ apiKey });
   const lang = ragConfig.responseLanguage === "es" ? "espanol" : ragConfig.responseLanguage;
 
-  return new Agent({
-    id: "catalog-manager",
-    name: "Catalog Manager",
-    description: "Gestiona catalogos de productos: crear, editar, listar, agregar/actualizar/eliminar productos y precios.",
-    instructions: `Eres un especialista en gestion de catalogos de cesped artificial.
+  return new AgentRunner({
+    system: `Eres un especialista en gestion de catalogos de cesped artificial.
 
 == CONTEXTO DE NEGOCIO ==
 Trabajas para una empresa de cesped artificial. El catalogo contiene ~8 tipos de cesped de diferentes alturas y gamas (economica, media, premium). Los precios son por m2 (metro cuadrado) e incluyen suministro + instalacion.
@@ -34,7 +31,7 @@ Hablas con un VENDEDOR de la empresa, NO con un cliente final. Usa un tono profe
 - NO inventes precios. Siempre consulta el catalogo real.
 
 == REGLAS DE PRESENTACION ==
-- Muestra precios con el simbolo de moneda (ej: 15,50 €/m2).
+- Muestra precios con el simbolo de moneda (ej: 15,50 \u20ac/m2).
 - Para listados, usa tablas con columnas claras: Codigo, Nombre, Precio, Unidad, Categoria.
 - Si un catalogo esta inactivo, indicalo claramente con "(INACTIVO)".
 - Cuando crees un producto, muestra el codigo asignado automaticamente.

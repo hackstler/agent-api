@@ -6,7 +6,7 @@ Plataforma multi-tenant de agentes RAG con integración WhatsApp para generació
 ## Stack Técnico
 - **Runtime**: Node.js + TypeScript strict
 - **API**: Hono (edge-first, SSE nativo)
-- **LLM Orchestration**: Mastra.ai (TypeScript nativo, RAG module nativo)
+- **LLM Orchestration**: Vercel AI SDK (`ai` package — generateText/streamText/tool)
 - **Vector DB**: PostgreSQL + pgvector (un solo DATABASE_URL)
 - **ORM**: Drizzle (lightweight, SQL-first)
 - **Embeddings**: Gemini `gemini-embedding-001` (768-dim, GOOGLE_API_KEY)
@@ -29,7 +29,7 @@ API (controllers, middleware)          ← orquesta application + infrastructure
   ↑
 Plugins (rag, quote)                   ← extienden funcionalidad con agents, tools y routes
   ↑
-Coordinator (agent principal)          ← orquesta plugins, punto de entrada del LLM
+Coordinator (AgentRunner principal)     ← orquesta plugins via delegation tools, punto de entrada del LLM
 ```
 
 ## Estructura del proyecto
@@ -86,7 +86,12 @@ src/
 │   │   └── persist-messages.ts        → Persistir conversaciones en DB
 │   └── health.ts                      → GET /health
 ├── agent/
-│   └── coordinator.ts                 → Agente coordinador (Emilio): orquesta todos los plugins
+│   ├── agent-runner.ts                → AgentRunner: wrapper sobre Vercel AI SDK generateText/streamText
+│   ├── coordinator.ts                 → Agente coordinador (Emilio): orquesta todos los plugins
+│   ├── delegation.ts                  → Creates delegation tools for sub-agent routing (returns DelegationResult)
+│   ├── load-history.ts                → Carga historial de conversación como ModelMessage[] (con contexto de tools)
+│   ├── tool-summaries.ts             → Extrae resúmenes de tool calls para persistencia cross-turn
+│   └── types.ts                       → AgentContext, AgentTools, AgentGenerateResult, DelegationResult, AgentStep
 ├── plugins/
 │   ├── plugin.interface.ts            → Contrato Plugin: id, name, agent?, tools, routes?, initialize?, shutdown?
 │   ├── plugin-registry.ts             → Registro y lifecycle de plugins

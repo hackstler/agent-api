@@ -1,5 +1,5 @@
 import type { Plugin } from "../plugin.interface.js";
-import type { ToolsInput } from "@mastra/core/agent";
+import type { AgentTools } from "../../agent/types.js";
 import { YouTubeApiService } from "./services/youtube-api.service.js";
 import { createSearchVideosTool } from "./tools/search-videos.tool.js";
 import { createGetVideoDetailsTool } from "./tools/get-video-details.tool.js";
@@ -11,7 +11,7 @@ export class YouTubePlugin implements Plugin {
   readonly name = "YouTube Plugin";
   readonly description = "Search YouTube videos and get video details.";
   readonly agent;
-  readonly tools: ToolsInput;
+  readonly tools: AgentTools;
 
   constructor() {
     const service = new YouTubeApiService(youtubeConfig.apiKey);

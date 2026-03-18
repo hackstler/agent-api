@@ -1,6 +1,8 @@
+import type { AgentStep } from "../../agent/types.js";
+
 /**
- * Extract source chunks from Mastra agent tool results.
- * Shared between chat.ts (REST API) and internal.ts (worker API).
+ * Extract source chunks from agent tool results.
+ * Shared between chat.routes.ts (REST API) and internal.controller.ts (worker API).
  */
 export interface ExtractedSource {
   id: string;
@@ -10,19 +12,13 @@ export interface ExtractedSource {
   excerpt: string;
 }
 
-export function extractSources(
-  steps: Array<{ toolResults?: Array<unknown> }>
-): ExtractedSource[] {
-  const allToolResults = steps.flatMap((s) => s.toolResults ?? []);
+export function extractSources(steps: AgentStep[]): ExtractedSource[] {
+  const allToolResults = steps.flatMap((s) => s.toolResults);
 
-  // Mastra 1.5 wraps tool results in a payload object
-  const searchResult = allToolResults.find((r) => {
-    const payload = (r as { payload?: { toolName?: string } }).payload;
-    return payload?.toolName === "searchDocuments";
-  });
+  const searchResult = allToolResults.find((r) => r.toolName === "searchDocuments");
   if (!searchResult) return [];
 
-  const res = (searchResult as { payload: { result?: unknown } }).payload.result as {
+  const res = searchResult.result as {
     chunks?: Array<{
       id: string;
       documentTitle: string;

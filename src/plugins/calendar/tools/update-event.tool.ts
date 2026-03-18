@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { tool } from "ai";
 import { z } from "zod";
 import type { CalendarApiService } from "../services/calendar-api.service.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
@@ -8,8 +8,7 @@ export interface UpdateEventDeps {
 }
 
 export function createUpdateEventTool({ calendarService }: UpdateEventDeps) {
-  return createTool({
-    id: "updateCalendarEvent",
+  return tool({
     description:
       "Update an existing event in the user's Google Calendar. Only the provided fields will be modified.",
 
@@ -24,13 +23,8 @@ export function createUpdateEventTool({ calendarService }: UpdateEventDeps) {
       timeZone: z.string().optional().describe("IANA time zone (e.g. Europe/Madrid). Defaults to UTC."),
     }),
 
-    outputSchema: z.object({
-      success: z.boolean(),
-      eventId: z.string(),
-    }),
-
-    execute: async ({ eventId, summary, start, end, description, location, attendees, timeZone }, context) => {
-      const userId = getAgentContextValue(context, "userId");
+    execute: async ({ eventId, summary, start, end, description, location, attendees, timeZone }, { experimental_context }) => {
+      const userId = getAgentContextValue({ experimental_context }, "userId");
       if (!userId) throw new Error('Missing userId in request context');
       const updates: Record<string, unknown> = {};
       if (summary !== undefined) updates["summary"] = summary;
