@@ -9,6 +9,7 @@ export interface OrgUserCount {
 export interface UserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
+  findByPhone(phone: string): Promise<User | null>;
   findByOrg(orgId: string): Promise<User[]>;
   findFirstByOrg(orgId: string): Promise<User | null>;
   findAll(filters?: { orgId?: string; search?: string }): Promise<User[]>;

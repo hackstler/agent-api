@@ -52,6 +52,7 @@ export interface AppDependencies {
   invitationManager?: InvitationManager;
   quoteRepo?: QuoteRepository;
   organizationRepo?: OrganizationRepository;
+  userRepo?: import("./domain/ports/repositories/user.repository.js").UserRepository;
   whatsappChannel?: WhatsAppChannel;
   attachmentStore?: AttachmentStore;
 }
@@ -144,10 +145,10 @@ export function createApp(deps: AppDependencies): Hono {
   }
 
   // Kapso WhatsApp webhooks — NO auth middleware (uses HMAC signature verification internally)
-  if (deps.whatsappChannel && deps.organizationRepo && deps.attachmentStore) {
+  if (deps.whatsappChannel && deps.organizationRepo && deps.userRepo && deps.attachmentStore) {
     app.route("/webhooks", createWebhookController(
       deps.coordinatorAgent, deps.convManager, deps.organizationRepo,
-      deps.whatsappChannel, deps.attachmentStore,
+      deps.userRepo, deps.whatsappChannel, deps.attachmentStore,
     ));
   }
 

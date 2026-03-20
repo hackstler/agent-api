@@ -58,6 +58,7 @@ export const users = pgTable("users", {
   email: text("email").unique(),
   name: text("name"),
   surname: text("surname"),
+  phone: text("phone"),
   orgId: text("org_id").notNull(),
   role: text("role").$type<"admin" | "user" | "super_admin">().notNull().default("user"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import type { AgentRunner } from "../../agent/agent-runner.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
 import type { OrganizationRepository } from "../../domain/ports/repositories/organization.repository.js";
+import type { UserRepository } from "../../domain/ports/repositories/user.repository.js";
 import type { WhatsAppChannel } from "../../domain/ports/whatsapp-channel.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import { createAgentContext } from "../../application/agent-context.js";
@@ -26,6 +27,7 @@ export function createWebhookController(
   agent: AgentRunner,
   convManager: ConversationManager,
   orgRepo: OrganizationRepository,
+  userRepo: UserRepository,
   whatsapp: WhatsAppChannel,
   attachmentStore: AttachmentStore,
 ): Hono {
@@ -102,16 +104,17 @@ export function createWebhookController(
     phoneNumberId: string,
     customerPhone: string,
   ): Promise<void> {
-    // Resolve org
-    const org = await orgRepo.findByWhatsappPhoneNumberId(phoneNumberId);
-    if (!org) {
-      console.warn("[webhook] No org for phoneNumberId:", phoneNumberId);
+    // Resolve user by their phone number
+    const user = await userRepo.findByPhone(customerPhone);
+    if (!user) {
+      console.warn("[webhook] No user found for phone:", customerPhone);
       await whatsapp.sendText(phoneNumberId, customerPhone,
-        "Este servicio no está configurado. Contacta al administrador.");
+        "No tienes acceso a este servicio. Regístrate en la plataforma y añade tu número de teléfono.");
       return;
     }
 
-    const userId = "whatsapp-customer";
+    const userId = user.id;
+    const orgId = user.orgId;
 
     // Resolve conversation
     const conversationId = await convManager.resolveOrCreateForChannel(
@@ -123,7 +126,7 @@ export function createWebhookController(
     // Agent context + history
     const experimental_context = createAgentContext({
       userId,
-      orgId: org.orgId,
+      orgId,
       conversationId,
     });
     const history = await loadConversationHistory(convManager, conversationId);
