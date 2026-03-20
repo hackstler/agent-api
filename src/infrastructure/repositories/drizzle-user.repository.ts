@@ -19,6 +19,15 @@ export class DrizzleUserRepository implements UserRepository {
     return result ?? null;
   }
 
+  async findByPhone(phone: string): Promise<User | null> {
+    // Normalize: strip leading + and spaces for matching
+    const normalized = phone.replace(/[^0-9]/g, "");
+    const result = await db.query.users.findFirst({
+      where: eq(users.phone, normalized),
+    });
+    return result ?? null;
+  }
+
   async findByOrg(orgId: string): Promise<User[]> {
     return db.query.users.findMany({
       where: eq(users.orgId, orgId),

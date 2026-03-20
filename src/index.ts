@@ -124,6 +124,7 @@ const app = createApp({
   invitationManager,
   quoteRepo,
   organizationRepo: orgRepo,
+  userRepo,
   ...(whatsappChannel ? { whatsappChannel } : {}),
   attachmentStore,
 });

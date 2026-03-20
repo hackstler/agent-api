@@ -28,6 +28,7 @@ export interface User {
   email: string | null;
   name: string | null;
   surname: string | null;
+  phone: string | null;
   orgId: string;
   role: "admin" | "user" | "super_admin";
   metadata: Record<string, unknown> | null;
