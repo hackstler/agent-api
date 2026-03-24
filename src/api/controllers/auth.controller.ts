@@ -25,6 +25,7 @@ const registerWithInviteValidator = z.object({
   password: z.string().min(8).optional(),
   firstName: z.string().max(100).optional(),
   lastName: z.string().max(100).optional(),
+  phone: z.string().max(50).optional(),
 });
 
 const registerValidator = z.object({
@@ -168,7 +169,7 @@ export function createAuthController(
       return c.json({ error: "Bad Request", message: parsed.error.message }, 400);
     }
 
-    const { inviteToken, idToken, email: bodyEmail, password, firstName, lastName } = parsed.data;
+    const { inviteToken, idToken, email: bodyEmail, password, firstName, lastName, phone } = parsed.data;
 
     // Validate invitation token
     const validation = await invitationManager.validateToken(inviteToken);
@@ -206,6 +207,7 @@ export function createAuthController(
       password: authConfig.strategy === "password" ? password : undefined,
       firstName,
       lastName,
+      phone,
       orgId: validation.orgId,
       role: validation.role,
     });

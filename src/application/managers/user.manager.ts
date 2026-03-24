@@ -39,6 +39,7 @@ export interface RegisterWithInviteDto {
   password?: string | undefined;
   firstName?: string | undefined;
   lastName?: string | undefined;
+  phone?: string | undefined;
   orgId: string;
   role: string;
 }
@@ -297,6 +298,7 @@ export class UserManager {
       email,
       name: this.trimOrNull(dto.firstName),
       surname: this.trimOrNull(dto.lastName),
+      phone: this.trimOrNull(dto.phone),
       orgId: dto.orgId.trim(),
       role,
       metadata,

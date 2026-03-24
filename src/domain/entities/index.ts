@@ -39,6 +39,7 @@ export interface NewUser {
   email?: string | null | undefined;
   name?: string | null | undefined;
   surname?: string | null | undefined;
+  phone?: string | null | undefined;
   orgId: string;
   role?: "admin" | "user" | "super_admin" | undefined;
   metadata?: Record<string, unknown> | null | undefined;
