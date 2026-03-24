@@ -8,7 +8,7 @@ import { extractToolSummaries, summarizeToolCall } from "../../../agent/tool-sum
 import { ragConfig } from "../config/rag.config.js";
 import { extractSources } from "../../../api/helpers/extract-sources.js";
 import { findPdfFilename } from "../../../api/helpers/find-pdf-filename.js";
-import { findEmailDraft } from "../../../api/helpers/find-email-draft.js";
+import { findPendingAction } from "../../../api/helpers/find-pending-action.js";
 import { createAgentContext } from "../../../application/agent-context.js";
 import { loadConversationHistory } from "../../../agent/load-history.js";
 import type { ConversationManager } from "../../../application/managers/conversation.manager.js";
@@ -242,11 +242,16 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
                 }
               }
 
-              // Detect email drafts — emit event so the frontend shows Send/Cancel buttons
+              // Detect pending actions (HITL) — emit event so the frontend shows approval UI
               {
-                const emailDraft = findEmailDraft(result);
-                if (emailDraft) {
-                  await emit({ type: "email-draft", draftId: emailDraft.draftId, preview: emailDraft.preview });
+                const pendingAction = findPendingAction(result);
+                if (pendingAction) {
+                  await emit({
+                    type: "pending-action",
+                    actionId: pendingAction.actionId,
+                    actionType: pendingAction.actionType,
+                    preview: pendingAction.preview,
+                  });
                 }
               }
               break;

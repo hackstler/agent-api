@@ -91,7 +91,20 @@ pluginRegistry.register(ragPlugin);
 const oauthProvider = new OAuthManagerAdapter(oauthManager);
 const attachmentRepo = new DrizzleAttachmentRepository();
 const attachmentStore = new PersistentAttachmentStore(attachmentRepo);
-const gmailPlugin = new GmailPlugin(oauthProvider, attachmentStore);
+
+// HITL: generic pending action system
+import { InMemoryActionStore } from "./infrastructure/stores/in-memory-action-store.js";
+import { ActionManager } from "./application/managers/action.manager.js";
+import { SendEmailExecutor } from "./plugins/gmail/executors/send-email.executor.js";
+import type { ActionExecutor } from "./domain/ports/action-executor.js";
+
+const actionStore = new InMemoryActionStore();
+// Executors are registered after plugin creation (need gmailService reference)
+const executors = new Map<string, ActionExecutor>();
+const actionManager = new ActionManager(actionStore, executors);
+
+const gmailPlugin = new GmailPlugin(oauthProvider, attachmentStore, actionManager);
+executors.set("send-email", new SendEmailExecutor(gmailPlugin.gmailService, attachmentStore));
 pluginRegistry.register(gmailPlugin);
 pluginRegistry.register(new CalendarPlugin(oauthProvider));
 pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo, quoteRepo }));
@@ -131,7 +144,7 @@ const app = createApp({
   userRepo,
   ...(whatsappChannel ? { whatsappChannel } : {}),
   attachmentStore,
-  gmailService: gmailPlugin.gmailService,
+  actionManager,
 });
 
 // ── Startup ────────────────────────────────────────────────────────────────────

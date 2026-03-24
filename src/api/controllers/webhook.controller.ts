@@ -12,10 +12,10 @@ import { loadConversationHistory } from "../../agent/load-history.js";
 import { extractSources } from "../helpers/extract-sources.js";
 import { extractToolSummaries } from "../../agent/tool-summaries.js";
 import { findPdfFilename } from "../helpers/find-pdf-filename.js";
-import { findEmailDraft } from "../helpers/find-email-draft.js";
-import { takeDraft } from "../../plugins/gmail/services/draft-store.js";
+import { findPendingAction } from "../helpers/find-pending-action.js";
+import { getActionLabels } from "../../application/action-labels.js";
 import { ragConfig } from "../../plugins/rag/config/rag.config.js";
-import type { GmailApiService } from "../../plugins/gmail/services/gmail-api.service.js";
+import type { ActionManager } from "../../application/managers/action.manager.js";
 
 // Dedup: track processed idempotency keys to avoid duplicate responses
 const processedKeys = new Map<string, number>();
@@ -35,7 +35,7 @@ export function createWebhookController(
   userRepo: UserRepository,
   whatsapp: WhatsAppChannel,
   attachmentStore: AttachmentStore,
-  gmailService?: GmailApiService,
+  actionManager?: ActionManager,
 ): Hono {
   const router = new Hono();
   const webhookSecret = process.env["KAPSO_WEBHOOK_SECRET"];
@@ -117,50 +117,32 @@ export function createWebhookController(
   });
 
   /**
-   * Handle interactive button replies (email confirm/cancel).
-   * Bypasses the agent entirely — deterministic HITL.
+   * Handle interactive button replies — generic HITL.
+   * Routes confirm_action:/cancel_action: to ActionManager.
+   * Bypasses the agent entirely — deterministic.
    */
   async function handleButtonReply(
     buttonId: string,
     phoneNumberId: string,
     customerPhone: string,
   ): Promise<void> {
-    if (buttonId.startsWith("confirm_email:")) {
-      const draftId = buttonId.replace("confirm_email:", "");
-      const draft = takeDraft(draftId);
-      if (!draft) {
-        await whatsapp.sendText(phoneNumberId, customerPhone, "El borrador ha expirado. Pídeme que lo prepare de nuevo.");
-        return;
-      }
+    const isConfirm = buttonId.startsWith("confirm_action:");
+    const isCancel = buttonId.startsWith("cancel_action:");
 
-      if (!gmailService) {
-        await whatsapp.sendText(phoneNumberId, customerPhone, "El servicio de email no está disponible.");
-        return;
-      }
-
-      // Resolve user for attachment retrieval
+    if ((isConfirm || isCancel) && actionManager) {
+      const actionId = buttonId.replace(/^(confirm|cancel)_action:/, "");
       const user = await userRepo.findByPhone(customerPhone);
       if (!user) return;
 
-      let attachment: { base64: string; mimetype: string; filename: string } | undefined;
-      if (draft.attachmentFilename) {
-        const stored = await attachmentStore.retrieve(user.id, draft.attachmentFilename);
-        if (stored) attachment = stored;
-      }
-
       try {
-        await gmailService.sendEmail(user.id, draft.to, draft.subject, draft.body, attachment);
-        await whatsapp.sendText(phoneNumberId, customerPhone, `Email enviado correctamente a ${draft.to}.`);
-        logger.info({ draftId, to: draft.to }, "Email sent via WhatsApp button confirmation");
+        const result = await actionManager.resolve(actionId, isConfirm, user.id);
+        await whatsapp.sendText(phoneNumberId, customerPhone, result.message);
+        logger.info({ actionId, approved: isConfirm }, "Action resolved via WhatsApp button");
       } catch (err) {
-        logger.error({ err, draftId }, "Failed to send email from WhatsApp button");
-        await whatsapp.sendText(phoneNumberId, customerPhone, "No se pudo enviar el email. Inténtalo de nuevo.");
+        logger.error({ err, actionId }, "Failed to resolve action from WhatsApp button");
+        const msg = err instanceof Error ? err.message : "Error procesando la acción.";
+        await whatsapp.sendText(phoneNumberId, customerPhone, msg);
       }
-      return;
-    }
-
-    if (buttonId.startsWith("cancel_email:")) {
-      await whatsapp.sendText(phoneNumberId, customerPhone, "Email cancelado.");
       return;
     }
 
@@ -227,17 +209,17 @@ export function createWebhookController(
     // Reply text
     await whatsapp.sendText(phoneNumberId, customerPhone, replyText);
 
-    // Detect email draft in tool results → send interactive buttons for HITL confirmation
-    // The agent's text reply already contains the full preview, so the button body
-    // is just a short action prompt to avoid duplicating the preview.
-    const emailDraft = findEmailDraft(result);
-    if (emailDraft) {
-      const { draftId } = emailDraft;
-      await whatsapp.sendInteractiveButtons(phoneNumberId, customerPhone, "¿Enviar este email?", [
-        { id: `confirm_email:${draftId}`, title: "Enviar" },
-        { id: `cancel_email:${draftId}`, title: "Cancelar" },
+    // Detect pending action in tool results → send interactive buttons for HITL confirmation
+    // The agent's text reply already contains the preview, so the button body
+    // is just a short action prompt to avoid duplicating information.
+    const pendingAction = findPendingAction(result);
+    if (pendingAction) {
+      const labels = getActionLabels(pendingAction.actionType);
+      await whatsapp.sendInteractiveButtons(phoneNumberId, customerPhone, labels.prompt, [
+        { id: `confirm_action:${pendingAction.actionId}`, title: labels.confirm },
+        { id: `cancel_action:${pendingAction.actionId}`, title: labels.cancel },
       ]);
-      logger.info({ draftId }, "Email draft buttons sent via Kapso webhook");
+      logger.info({ actionId: pendingAction.actionId, actionType: pendingAction.actionType }, "HITL buttons sent via Kapso webhook");
     }
 
     // PDF: only if this specific request generated one AND the agent didn't
