@@ -276,8 +276,12 @@ export function createWebhookController(
 
     // Download media if present (image or document)
     let attachments: MediaAttachment[] | undefined;
+    // Track diagnostic info for debugging image processing failures
+    let mediaDiagnostic = "";
+
     if (mediaInfo) {
       const kapsoApiKey = process.env["KAPSO_API_KEY"] ?? "";
+      logger.info({ phoneNumberId, mediaId: mediaInfo.mediaId, mimeType: mediaInfo.mimeType, hasApiKey: !!kapsoApiKey }, "Attempting Kapso media download");
       const data = await downloadKapsoMedia(phoneNumberId, mediaInfo.mediaId, kapsoApiKey);
       if (data) {
         const attachment: MediaAttachment = { data, mimeType: mediaInfo.mimeType };
@@ -288,7 +292,8 @@ export function createWebhookController(
           "Media downloaded for multimodal processing",
         );
       } else {
-        logger.warn({ mediaId: mediaInfo.mediaId }, "Media download failed — processing text-only");
+        mediaDiagnostic = "[DIAG:DOWNLOAD_FAILED]";
+        logger.error({ mediaId: mediaInfo.mediaId, phoneNumberId }, "CRITICAL: Media download failed — image lost");
       }
     }
 
@@ -304,9 +309,6 @@ export function createWebhookController(
     const history = await loadConversationHistory(convManager, conversationId);
 
     // ── Receipt extraction at the entry point (before agents) ──────────────
-    // Extract receipt data DIRECTLY here instead of relying on the delegation
-    // pipeline (pending-media → coordinator → delegation → extraction).
-    // This guarantees the image data is available for extraction.
     if (attachments?.length && attachments[0]!.mimeType.startsWith("image/")) {
       logger.info({ bytes: attachments[0]!.data.length, mimeType: attachments[0]!.mimeType }, "Attempting receipt extraction at webhook level");
       const extracted = await extractReceiptData(attachments[0]!);
@@ -314,17 +316,24 @@ export function createWebhookController(
         const issues = validateExtraction(extracted);
         messageText = formatExtractionForAgent(extracted, issues);
         logger.info({ vendor: extracted.vendor, amount: extracted.amount }, "Receipt extracted at webhook — enriching query");
-        // Store media for Drive upload tool
         storePendingMedia(conversationId, attachments);
-        attachments = undefined; // Don't pass raw image — extraction done
+        attachments = undefined;
       } else {
-        logger.warn("Receipt extraction failed at webhook level — passing image to agents");
-        // Fall through: store media and pass image to coordinator as before
+        mediaDiagnostic = "[DIAG:EXTRACTION_FAILED]";
+        logger.error("CRITICAL: Receipt extraction returned null despite having image data");
         storePendingMedia(conversationId, attachments);
       }
     } else if (attachments) {
-      // Non-image attachments (PDFs, docs) — store for delegation
       storePendingMedia(conversationId, attachments);
+    } else if (mediaInfo && !attachments) {
+      // mediaInfo exists but download failed — no diagnostic tag set yet means old code path
+      if (!mediaDiagnostic) mediaDiagnostic = "[DIAG:NO_ATTACHMENTS]";
+    }
+
+    // Append diagnostic tag to messageText so we can see it in the agent response
+    if (mediaDiagnostic) {
+      messageText = `${messageText} ${mediaDiagnostic}`;
+      logger.error({ diagnostic: mediaDiagnostic, messageText }, "Image processing failed — diagnostic tag added");
     }
 
     // Run agent (multimodal if attachments still present, text-only if extraction succeeded)
