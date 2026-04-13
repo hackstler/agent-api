@@ -4,6 +4,7 @@ import type { AgentTools, DelegationResult } from "./types.js";
 import type { Plugin } from "../plugins/plugin.interface.js";
 import { getAgentContextValue } from "../application/agent-context.js";
 import { loadConversationHistory } from "./load-history.js";
+import { takePendingMedia } from "./pending-media.js";
 import type { ConversationManager } from "../application/managers/conversation.manager.js";
 import { ragConfig } from "../plugins/rag/config/rag.config.js";
 import { logger } from "../shared/logger.js";
@@ -89,6 +90,12 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager) 
           ? await loadConversationHistory(convManager, conversationId, ragConfig.windowSize)
           : [];
 
+        // Forward any pending media attachments (images/docs from this request)
+        const attachments = conversationId ? takePendingMedia(conversationId) : undefined;
+        if (attachments?.length) {
+          logger.info({ pluginId: plugin.id, mediaCount: attachments.length }, "Forwarding media to sub-agent");
+        }
+
         // Wrap plugin tools with permission checks
         const wrappedTools = wrapToolsWithPermissions(plugin.tools, query);
 
@@ -97,6 +104,7 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager) 
           messages: history,
           ...(ctx ? { experimental_context: ctx } : {}),
           tools: wrappedTools,
+          ...(attachments?.length ? { attachments } : {}),
         });
 
         if (!result.text?.trim()) {
