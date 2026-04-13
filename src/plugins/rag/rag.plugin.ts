@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AgentRunner } from "../../agent/agent-runner.js";
 import type { Plugin } from "../plugin.interface.js";
 import type { ConversationManager } from "../../application/managers/conversation.manager.js";
+import type { MemoryManager } from "../../application/managers/memory.manager.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import { ragAgent, ragTools } from "./rag.agent.js";
 import { createChatRoutes } from "./routes/chat.routes.js";
@@ -16,6 +17,7 @@ export class RagPlugin implements Plugin {
   private coordinatorAgent?: AgentRunner;
   private convManager?: ConversationManager;
   private attachmentStore?: AttachmentStore;
+  private memoryManager?: MemoryManager;
 
   setCoordinatorAgent(agent: AgentRunner): void {
     this.coordinatorAgent = agent;
@@ -29,6 +31,10 @@ export class RagPlugin implements Plugin {
     this.attachmentStore = store;
   }
 
+  setMemoryManager(memoryManager: MemoryManager): void {
+    this.memoryManager = memoryManager;
+  }
+
   routes(): Hono {
     if (!this.convManager) {
       throw new Error("RagPlugin: convManager must be set before calling routes()");
@@ -36,7 +42,12 @@ export class RagPlugin implements Plugin {
     const app = new Hono();
 
     // Use coordinator if available (enables Gmail/Calendar delegation from dashboard)
-    app.route("/chat", createChatRoutes(this.coordinatorAgent ?? this.agent, this.convManager, this.attachmentStore));
+    app.route("/chat", createChatRoutes(
+      this.coordinatorAgent ?? this.agent,
+      this.convManager,
+      this.attachmentStore,
+      this.memoryManager,
+    ));
     app.route("/ingest", createIngestRoutes());
 
     return app;

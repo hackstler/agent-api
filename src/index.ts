@@ -40,6 +40,10 @@ import { OAuthManagerAdapter } from "./plugins/google-common/oauth-manager-adapt
 import { DrizzleAttachmentRepository } from "./infrastructure/repositories/drizzle-attachment.repository.js";
 import { PersistentAttachmentStore } from "./infrastructure/stores/persistent-attachment-store.js";
 
+// Memory
+import { DrizzleMemoryRepository } from "./infrastructure/repositories/drizzle-memory.repository.js";
+import { MemoryManager } from "./application/managers/memory.manager.js";
+
 // Coordinator agent
 import { createCoordinatorAgent } from "./agent/coordinator.js";
 
@@ -82,6 +86,8 @@ const catalogManager = new CatalogManager(catalogRepo);
 const invitationManager = new InvitationManager(invitationRepo, orgRepo, PASSWORD_SALT);
 const tokenEncryption = new AesTokenEncryption();
 const oauthManager = new OAuthManager(oauthTokenRepo, tokenEncryption);
+const memoryRepo = new DrizzleMemoryRepository();
+const memoryManager = new MemoryManager(memoryRepo);
 
 // 4. Plugin registry
 const pluginRegistry = new PluginRegistry();
@@ -97,13 +103,14 @@ pluginRegistry.register(new CalendarPlugin(oauthProvider));
 pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo, quoteRepo }));
 pluginRegistry.register(new CatalogManagerPlugin({ catalogManager, catalogRepo }));
 
-// 5. Coordinator agent (uses all plugin tools + conversation history for sub-agents)
-const coordinatorAgent = createCoordinatorAgent(pluginRegistry, convManager);
+// 5. Coordinator agent (uses all plugin tools + conversation history + memory for sub-agents)
+const coordinatorAgent = createCoordinatorAgent(pluginRegistry, convManager, memoryManager);
 
 // Wire coordinator + convManager + memory into RAG plugin so /chat uses coordinator (enables Gmail/Calendar from dashboard)
 ragPlugin.setCoordinatorAgent(coordinatorAgent);
 ragPlugin.setConversationManager(convManager);
 ragPlugin.setAttachmentStore(attachmentStore);
+ragPlugin.setMemoryManager(memoryManager);
 
 // 5b. Kapso WhatsApp channel (optional — only if KAPSO_API_KEY is set)
 import { KapsoChannel } from "./infrastructure/whatsapp/kapso-channel.js";
@@ -132,6 +139,7 @@ const app = createApp({
   ...(whatsappChannel ? { whatsappChannel } : {}),
   attachmentStore,
   gmailService: gmailPlugin.gmailService,
+  memoryManager,
 });
 
 // ── Startup ────────────────────────────────────────────────────────────────────

@@ -14,6 +14,8 @@ export interface GenerateOptions {
   messages?: ModelMessage[];
   experimental_context?: AgentContext;
   maxSteps?: number;
+  /** Override the agent's default tools for this call only (e.g., permission-wrapped tools). */
+  tools?: ToolSet;
 }
 
 export interface StreamOptions {
@@ -41,7 +43,7 @@ export class AgentRunner {
   }
 
   async generate(opts: GenerateOptions): Promise<AgentGenerateResult> {
-    const { prompt, messages, experimental_context, maxSteps } = opts;
+    const { prompt, messages, experimental_context, maxSteps, tools: toolOverrides } = opts;
 
     const allMessages: ModelMessage[] = [
       ...(messages ?? []),
@@ -54,7 +56,7 @@ export class AgentRunner {
       model: this.config.model,
       system,
       messages: allMessages,
-      tools: this.config.tools,
+      tools: toolOverrides ?? this.config.tools,
       stopWhen: stepCountIs(maxSteps ?? this.config.maxSteps),
       ...(experimental_context ? { experimental_context } : {}),
     });

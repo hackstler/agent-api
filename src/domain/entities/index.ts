@@ -390,6 +390,32 @@ export interface NewQuote {
   createdAt?: Date | undefined;
 }
 
+// ── Agent Memory ──────────────────────────────────────────────────────────────
+
+export type AgentMemoryType = "client_pref" | "product_insight" | "workflow_pattern" | "user_pref";
+
+export interface AgentMemory {
+  id: string;
+  orgId: string;
+  userId: string | null;
+  type: AgentMemoryType;
+  key: string;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewAgentMemory {
+  id?: string | undefined;
+  orgId: string;
+  userId?: string | null | undefined;
+  type: AgentMemoryType;
+  key: string;
+  content: string;
+  metadata?: Record<string, unknown> | null | undefined;
+}
+
 // ── Catalog ─────────────────────────────────────────────────────────────────
 
 export interface Catalog {

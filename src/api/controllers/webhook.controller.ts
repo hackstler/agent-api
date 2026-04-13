@@ -9,6 +9,7 @@ import type { WhatsAppChannel } from "../../domain/ports/whatsapp-channel.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import { createAgentContext } from "../../application/agent-context.js";
 import { loadConversationHistory } from "../../agent/load-history.js";
+import { loadMemoryContext } from "../../agent/load-memories.js";
 import { extractSources } from "../helpers/extract-sources.js";
 import { extractToolSummaries } from "../../agent/tool-summaries.js";
 import { findPdfFilename } from "../helpers/find-pdf-filename.js";
@@ -16,6 +17,7 @@ import { findEmailDraft } from "../helpers/find-email-draft.js";
 import { takeDraft } from "../../plugins/gmail/services/draft-store.js";
 import { ragConfig } from "../../plugins/rag/config/rag.config.js";
 import type { GmailApiService } from "../../plugins/gmail/services/gmail-api.service.js";
+import type { MemoryManager } from "../../application/managers/memory.manager.js";
 
 // Dedup: track processed idempotency keys to avoid duplicate responses
 const processedKeys = new Map<string, number>();
@@ -36,6 +38,7 @@ export function createWebhookController(
   whatsapp: WhatsAppChannel,
   attachmentStore: AttachmentStore,
   gmailService?: GmailApiService,
+  memoryManager?: MemoryManager,
 ): Hono {
   const router = new Hono();
   const webhookSecret = process.env["KAPSO_WEBHOOK_SECRET"];
@@ -196,12 +199,13 @@ export function createWebhookController(
     );
 
     const experimental_context = createAgentContext({ userId, orgId, conversationId });
+    const memoryMessages = await loadMemoryContext(memoryManager, orgId);
     const history = await loadConversationHistory(convManager, conversationId);
 
     // Run agent
     const result = await agent.generate({
       prompt: messageText,
-      messages: history,
+      messages: [...memoryMessages, ...history],
       experimental_context,
     });
 

@@ -9,10 +9,12 @@ import type { ConversationManager } from "../../application/managers/conversatio
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import { createAgentContext } from "../../application/agent-context.js";
 import { loadConversationHistory } from "../../agent/load-history.js";
+import { loadMemoryContext } from "../../agent/load-memories.js";
 import { extractSources } from "../helpers/extract-sources.js";
 import { formatForWhatsApp, buildSourcesFooter } from "../helpers/format-whatsapp.js";
 import { findPdfFilename } from "../helpers/find-pdf-filename.js";
 import { findEmailDraft } from "../helpers/find-email-draft.js";
+import type { MemoryManager } from "../../application/managers/memory.manager.js";
 import { ragConfig } from "../../plugins/rag/config/rag.config.js";
 
 export interface DocumentAttachment {
@@ -75,6 +77,7 @@ export function createInternalController(
   convManager: ConversationManager,
   agent: AgentRunner,
   attachmentStore: AttachmentStore,
+  memoryManager?: MemoryManager,
 ): Hono {
   const router = new Hono();
 
@@ -131,6 +134,7 @@ export function createInternalController(
       );
 
       const experimental_context = createAgentContext({ userId, orgId, conversationId });
+      const memoryMessages = await loadMemoryContext(memoryManager, orgId);
       const history = await loadConversationHistory(convManager, conversationId);
 
       let result: AgentGenerateResult | undefined;
@@ -140,7 +144,7 @@ export function createInternalController(
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         result = await agent.generate({
           prompt: messageBody,
-          messages: history,
+          messages: [...memoryMessages, ...history],
           experimental_context,
         });
         replyText = result.text?.trim() ?? "";

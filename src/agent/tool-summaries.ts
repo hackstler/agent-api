@@ -75,6 +75,16 @@ export function summarizeToolCall(tr: AgentToolResult): string {
       return "Detalles de video";
     case "searchWeb":
       return "Búsqueda web";
+    case "saveMemory": {
+      const key = r?.["key"] as string | undefined;
+      return key ? `Memoria guardada: ${key}` : "Memoria guardada";
+    }
+    case "recallMemory": {
+      const memCount = (r?.["count"] as number) ?? 0;
+      return `Memorias: ${memCount} resultado${memCount !== 1 ? "s" : ""}`;
+    }
+    case "deleteMemory":
+      return "Memoria eliminada";
     default:
       return tr.toolName;
   }
