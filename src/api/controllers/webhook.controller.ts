@@ -25,17 +25,15 @@ import type { MemoryManager } from "../../application/managers/memory.manager.js
 const KAPSO_BASE = "https://api.kapso.ai/meta/whatsapp/v24.0";
 
 /**
- * Download a media object from Kapso.
- *
- * Meta Cloud API media retrieval:
- *   1. GET /{mediaId} → { url, mime_type }  (media ID directly, NOT under phoneNumberId)
- *   2. GET {url} → binary
- */
 /**
  * Download media from Kapso's WhatsApp API (two-step flow).
  *
- * Step 1: GET /{mediaId}?phone_number_id={phoneNumberId} → { url, mime_type, ... }
- * Step 2: GET {url} (with X-API-Key) → binary data
+ * Step 1: GET /{mediaId}?phone_number_id={phoneNumberId} → { url, download_url, mime_type }
+ * Step 2: GET {download_url} → binary (token is in the URL, no auth headers needed)
+ *
+ * Kapso returns two download options:
+ * - `download_url`: Kapso-hosted signed URL (4 min expiry, no auth headers needed)
+ * - `url`: Meta CDN URL (5 min expiry, no auth headers needed)
  *
  * The phone_number_id query parameter is REQUIRED — without it Kapso returns
  * 404 "WhatsApp configuration not found".
@@ -63,18 +61,17 @@ async function downloadKapsoMedia(
     const meta = await metaRes.json() as Record<string, unknown>;
     logger.info({ mediaId, metaKeys: Object.keys(meta) }, "Kapso media info response");
 
-    const downloadUrl = (meta["url"] ?? meta["link"]) as string | undefined;
+    // Prefer download_url (Kapso-signed, no auth needed) over url (Meta CDN)
+    const downloadUrl = (meta["download_url"] ?? meta["url"]) as string | undefined;
     if (!downloadUrl) {
-      logger.error({ mediaId, meta: JSON.stringify(meta).slice(0, 500) }, "Kapso media info missing url field");
+      logger.error({ mediaId, meta: JSON.stringify(meta).slice(0, 500) }, "Kapso media info missing download URL");
       return null;
     }
 
-    // Step 2: Download binary
+    // Step 2: Download binary — signed URLs don't need auth headers
     logger.info({ mediaId, downloadUrl: downloadUrl.slice(0, 120) }, "Kapso: downloading binary");
 
-    const binaryRes = await fetch(downloadUrl, {
-      headers: { "X-API-Key": apiKey },
-    });
+    const binaryRes = await fetch(downloadUrl);
     if (!binaryRes.ok) {
       const errBody = await binaryRes.text().catch(() => "");
       logger.error({ mediaId, status: binaryRes.status, body: errBody.slice(0, 300) }, "Kapso media binary download failed");
