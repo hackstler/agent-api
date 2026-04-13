@@ -359,6 +359,26 @@ export const grassPricing = pgTable(
   })
 );
 
+// ── Agent memories (persistent cross-session learning) ────────────────────────
+export const agentMemories = pgTable(
+  "agent_memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: text("org_id").notNull(),
+    userId: uuid("user_id"),               // NULL = org-wide memory
+    type: text("type").$type<"client_pref" | "product_insight" | "workflow_pattern" | "user_pref">().notNull(),
+    key: text("key").notNull(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    orgTypeKeyUq: uniqueIndex("agent_memories_org_type_key_uq").on(table.orgId, table.type, table.key),
+    orgIdx: index("agent_memories_org_id_idx").on(table.orgId),
+  })
+);
+
 // Embedding dimension: 768 for Gemini gemini-embedding-001 (default)
 // 1536 for OpenAI text-embedding-3-small — set EMBEDDING_DIM env var to override
 const EMBEDDING_DIM = Number(process.env["EMBEDDING_DIM"] ?? 768);
@@ -476,6 +496,10 @@ export const grassPricingRelations = relations(grassPricing, ({ one }) => ({
   }),
 }));
 
+export const agentMemoriesRelations = relations(agentMemories, ({ one }) => ({
+  user: one(users, { fields: [agentMemories.userId], references: [users.id] }),
+}));
+
 // ============================================================
 // Types
 // ============================================================
@@ -510,3 +534,5 @@ export type GrassPricingRow = typeof grassPricing.$inferSelect;
 export type NewGrassPricingRow = typeof grassPricing.$inferInsert;
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type NewAttachmentRow = typeof attachments.$inferInsert;
+export type AgentMemoryRow = typeof agentMemories.$inferSelect;
+export type NewAgentMemoryRow = typeof agentMemories.$inferInsert;

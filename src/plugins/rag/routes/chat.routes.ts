@@ -11,7 +11,9 @@ import { findPdfFilename } from "../../../api/helpers/find-pdf-filename.js";
 import { findEmailDraft } from "../../../api/helpers/find-email-draft.js";
 import { createAgentContext } from "../../../application/agent-context.js";
 import { loadConversationHistory } from "../../../agent/load-history.js";
+import { loadMemoryContext } from "../../../agent/load-memories.js";
 import type { ConversationManager } from "../../../application/managers/conversation.manager.js";
+import type { MemoryManager } from "../../../application/managers/memory.manager.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
 import type { ToolCallSummary } from "../../../domain/entities/index.js";
 
@@ -24,7 +26,7 @@ const chatSchema = z.object({
 /**
  * Factory: creates chat routes bound to a specific agent instance.
  */
-export function createChatRoutes(agent: AgentRunner, convManager: ConversationManager, attachmentStore?: AttachmentStore): Hono {
+export function createChatRoutes(agent: AgentRunner, convManager: ConversationManager, attachmentStore?: AttachmentStore, memoryManager?: MemoryManager): Hono {
   const chat = new Hono();
 
   /**
@@ -46,9 +48,10 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
     const conversationId = await resolveConversationId(parsed.data.conversationId, convManager, userId, query);
 
     const experimental_context = createAgentContext({ userId: userId ?? "anonymous", orgId, conversationId });
+    const memoryMessages = await loadMemoryContext(memoryManager, orgId);
     const history = await loadConversationHistory(convManager, conversationId);
 
-    const result = await agent.generate({ prompt: query, messages: history, experimental_context });
+    const result = await agent.generate({ prompt: query, messages: [...memoryMessages, ...history], experimental_context });
 
     const sources = extractSources(result.steps);
     const toolSummaries = extractToolSummaries(result.steps);
@@ -131,6 +134,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
           orgId,
           conversationId,
         });
+        const memoryMessages = await loadMemoryContext(memoryManager, orgId);
         const history = await loadConversationHistory(convManager, conversationId);
 
         // Persist user message BEFORE streaming — survives stream failures
@@ -142,7 +146,7 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
 
         const agentStream = await agent.stream({
           prompt: parsed.data.query,
-          messages: history,
+          messages: [...memoryMessages, ...history],
           experimental_context,
         });
 
@@ -176,14 +180,29 @@ export function createChatRoutes(agent: AgentRunner, convManager: ConversationMa
                 });
               }
 
-              // Delegation tool results → emit agent-end + extract nested sources/attachments
+              // Delegation tool results → emit agent-end + extract nested sources/attachments/confirmations
               if (toolName?.startsWith("delegateTo_")) {
                 const agentId = "agent-" + toolName.replace("delegateTo_", "");
                 await emit({ type: "agent-end", agentId });
 
+                const delegation = result as DelegationResult | undefined;
+
+                // Emit confirmation requests from sub-agent tools that need user approval
+                const confirmResults = delegation?.toolResults?.filter(
+                  (tr) => (tr.result as Record<string, unknown>)?.["needsConfirmation"] === true,
+                ) ?? [];
+                for (const cr of confirmResults) {
+                  const crResult = cr.result as { toolName?: string; message?: string; proposedInput?: unknown };
+                  await emit({
+                    type: "confirm",
+                    toolName: crResult.toolName ?? cr.toolName,
+                    message: crResult.message ?? "¿Confirmas esta acción?",
+                    proposedInput: crResult.proposedInput,
+                  });
+                }
+
                 // Extract sources from nested RAG delegation — uses typed DelegationResult
                 if (!sourcesEmitted) {
-                  const delegation = result as DelegationResult | undefined;
                   const ragResults = delegation?.toolResults?.filter((tr) => tr.toolName === "searchDocuments") ?? [];
                   for (const sr of ragResults) {
                     const res = sr.result as {

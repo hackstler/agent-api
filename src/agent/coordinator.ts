@@ -2,15 +2,23 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { AgentRunner } from "./agent-runner.js";
 import type { PluginRegistry } from "../plugins/plugin-registry.js";
 import type { ConversationManager } from "../application/managers/conversation.manager.js";
+import type { MemoryManager } from "../application/managers/memory.manager.js";
 import { ragConfig } from "../plugins/rag/config/rag.config.js";
 import { getTemporalContext } from "./temporal-context.js";
+import { createMemoryTools } from "./memory-tools.js";
 
 const google = createGoogleGenerativeAI({
   apiKey: (process.env["GOOGLE_API_KEY"] ?? process.env["GOOGLE_GENERATIVE_AI_API_KEY"])!,
 });
 
-export function createCoordinatorAgent(registry: PluginRegistry, convManager: ConversationManager): AgentRunner {
-  const tools = registry.getDelegationTools(convManager);
+export function createCoordinatorAgent(
+  registry: PluginRegistry,
+  convManager: ConversationManager,
+  memoryManager?: MemoryManager,
+): AgentRunner {
+  const delegationTools = registry.getDelegationTools(convManager);
+  const memoryTools = memoryManager ? createMemoryTools(memoryManager) : {};
+  const tools = { ...delegationTools, ...memoryTools };
 
   const lang = ragConfig.responseLanguage;
   const isSpanish = lang === "es";
@@ -19,6 +27,32 @@ export function createCoordinatorAgent(registry: PluginRegistry, convManager: Co
     .getAll()
     .map((p) => `- delegateTo_${p.id}: ${p.name} — ${p.description}`)
     .join("\n");
+
+  const memorySection = memoryManager
+    ? `
+== PERSISTENT MEMORY ==
+
+You have access to persistent memory tools that remember information across conversations:
+- saveMemory: Save a learning about a client, product, or workflow pattern
+- recallMemory: Search for previously saved memories
+- deleteMemory: Remove an outdated or incorrect memory
+
+WHEN TO SAVE MEMORIES:
+- Client preferences you learn during conversations: "Cliente Juan siempre pide césped de 40mm"
+- Product insights: "El césped Premium tiene más demanda en verano"
+- Workflow patterns: "Para pedidos grandes, siempre consultar stock antes"
+- User/seller preferences: "El vendedor Pedro prefiere respuestas breves"
+- Recurring client information: discounts, preferred contact methods, past issues
+
+WHEN NOT TO SAVE:
+- Trivial or one-time information
+- Information already in the knowledge base (documents)
+- Temporary context that won't be useful in future conversations
+
+Memories injected at the start of each conversation appear in the == MEMORIAS GUARDADAS == section of the context.
+You can also call recallMemory to search for specific memories during a conversation.
+`
+    : "";
 
   return new AgentRunner({
     system: () => `You are ${ragConfig.agentName}, a personal assistant for salespeople.
@@ -46,6 +80,16 @@ Be natural, warm, and human-like. You are a helpful colleague, NOT a robotic ass
 - NEVER introduce yourself with a template or scripted message. NEVER say "Soy X, tu asistente personal" unless it's the very first interaction.
 - Read the conversation history: if you already greeted the user, do NOT greet them again. Continue the conversation naturally.
 - Match the user's tone: if they're casual, be casual. If they're formal, be formal.
+${memorySection}
+== MESSAGE ISOLATION ==
+
+CRITICAL: Always respond to the user's CURRENT (last) message ONLY. The conversation history provides context,
+but each message is an independent request unless the user explicitly references a previous one.
+- If the history contains session boundary markers ("--- Nueva sesión ---"), everything BEFORE the marker
+  is old context from a previous interaction. Do NOT continue or re-execute actions from before the boundary.
+- NEVER mix actions: if the current message asks to save a YouTube link, ONLY save that link.
+  Do NOT also re-save or reference notes from previous turns.
+- When in doubt about what the user wants, respond ONLY to the literal text of their LAST message.
 
 == ROUTING ==
 

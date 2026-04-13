@@ -38,6 +38,7 @@ import health from "./api/health.js";
 import type { WhatsAppChannel } from "./domain/ports/whatsapp-channel.js";
 import type { AttachmentStore } from "./domain/ports/attachment-store.js";
 import type { GmailApiService } from "./plugins/gmail/services/gmail-api.service.js";
+import type { MemoryManager } from "./application/managers/memory.manager.js";
 
 export interface AppDependencies {
   userManager: UserManager;
@@ -59,6 +60,7 @@ export interface AppDependencies {
   whatsappChannel?: WhatsAppChannel;
   attachmentStore?: AttachmentStore;
   gmailService?: GmailApiService;
+  memoryManager?: MemoryManager;
 }
 
 export function createApp(deps: AppDependencies): Hono {
@@ -158,14 +160,14 @@ export function createApp(deps: AppDependencies): Hono {
   if (deps.whatsappChannel && deps.organizationRepo && deps.userRepo && deps.attachmentStore) {
     app.route("/webhooks", createWebhookController(
       deps.coordinatorAgent, deps.convManager, deps.organizationRepo,
-      deps.userRepo, deps.whatsappChannel, deps.attachmentStore, deps.gmailService,
+      deps.userRepo, deps.whatsappChannel, deps.attachmentStore, deps.gmailService, deps.memoryManager,
     ));
   }
 
   // Internal worker endpoints — worker JWT auth
   const workerAuth = requireWorker();
   app.use("/internal/*", workerAuth);
-  app.route("/internal", createInternalController(deps.waManager, deps.convManager, deps.coordinatorAgent, deps.attachmentStore!));
+  app.route("/internal", createInternalController(deps.waManager, deps.convManager, deps.coordinatorAgent, deps.attachmentStore!, deps.memoryManager));
 
   // ── 404 + error fallback ─────────────────────────────────────────────────────
   app.notFound((c) => c.json({ error: "NotFound", message: "Not found" }, 404));

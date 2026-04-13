@@ -7,6 +7,53 @@ import { loadConversationHistory } from "./load-history.js";
 import type { ConversationManager } from "../application/managers/conversation.manager.js";
 import { ragConfig } from "../plugins/rag/config/rag.config.js";
 import { logger } from "../shared/logger.js";
+import { getToolPermission } from "./permissions.js";
+import { verifyDelegationResult } from "./verification.js";
+
+/**
+ * Wraps a plugin's tools with permission checks.
+ * Tools with 'confirm' permission that are called without CONFIRMED: prefix
+ * return a description of what they would do instead of executing.
+ * Tools with 'deny' permission always return an error.
+ */
+function wrapToolsWithPermissions(tools: AgentTools, query: string): AgentTools {
+  const wrapped: AgentTools = {};
+  const isConfirmed = query.startsWith("CONFIRMED:");
+
+  for (const [name, t] of Object.entries(tools)) {
+    const permission = getToolPermission(name);
+
+    if (permission.level === "deny") {
+      wrapped[name] = tool({
+        description: (t as Record<string, unknown>)["description"] as string ?? name,
+        inputSchema: z.object({ _reason: z.string().optional() }),
+        execute: async () => ({
+          error: true,
+          message: `La acción "${name}" no está permitida en esta organización.`,
+        }),
+      });
+    } else if (permission.level === "confirm" && !isConfirmed) {
+      // Pass through the original tool but with a wrapped execute that blocks
+      // We keep the original inputSchema so the LLM can still fill the parameters
+      const originalSchema = (t as Record<string, unknown>)["inputSchema"];
+      wrapped[name] = tool({
+        description: (t as Record<string, unknown>)["description"] as string ?? name,
+        inputSchema: originalSchema as z.ZodObject<z.ZodRawShape> ?? z.object({ input: z.string().optional() }),
+        execute: async (input) => ({
+          needsConfirmation: true,
+          toolName: name,
+          message: permission.message ?? `¿Confirmas la acción "${name}"?`,
+          proposedInput: input,
+        }),
+      });
+    } else {
+      // Auto or confirmed → pass through unchanged
+      wrapped[name] = t;
+    }
+  }
+
+  return wrapped;
+}
 
 /**
  * Creates a single delegation tool that wraps a plugin's agent.
@@ -14,6 +61,10 @@ import { logger } from "../shared/logger.js";
  *
  * Conversation history is loaded from the DB and passed to the sub-agent so it can
  * understand context from previous turns (names, topics, references).
+ *
+ * Features:
+ * - Permission-wrapped tools: sub-agent tools are wrapped with permission checks
+ * - Post-delegation verification: results are validated with programmatic rules
  *
  * Returns a DelegationResult — the shared contract consumed by
  * chat.routes.ts (streaming SSE) and internal.controller.ts (WhatsApp).
@@ -38,10 +89,14 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager) 
           ? await loadConversationHistory(convManager, conversationId, ragConfig.windowSize)
           : [];
 
+        // Wrap plugin tools with permission checks
+        const wrappedTools = wrapToolsWithPermissions(plugin.tools, query);
+
         const result = await plugin.agent.generate({
           prompt: query,
           messages: history,
           ...(ctx ? { experimental_context: ctx } : {}),
+          tools: wrappedTools,
         });
 
         if (!result.text?.trim()) {
@@ -51,6 +106,16 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager) 
 
         // Flatten toolResults from all steps — preserves the DelegationResult contract
         const toolResults = result.steps.flatMap((s) => s.toolResults);
+
+        // Post-delegation verification
+        const verification = verifyDelegationResult(plugin.id, { text: result.text, toolResults });
+        if (!verification.valid) {
+          logger.warn({ pluginId: plugin.id, reason: verification.reason }, "Delegation verification failed");
+          return {
+            text: result.text + `\n\n⚠️ Nota: ${verification.reason}`,
+            toolResults,
+          };
+        }
 
         return { text: result.text, toolResults };
       } catch (error) {
