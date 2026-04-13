@@ -31,44 +31,81 @@ const KAPSO_BASE = "https://api.kapso.ai/meta/whatsapp/v24.0";
  *   1. GET /{mediaId} → { url, mime_type }  (media ID directly, NOT under phoneNumberId)
  *   2. GET {url} → binary
  */
+/**
+ * Try multiple URL patterns to fetch media info from Kapso.
+ * Returns the JSON response from the first URL that succeeds.
+ */
+async function fetchKapsoMediaInfo(
+  phoneNumberId: string,
+  mediaId: string,
+  apiKey: string,
+): Promise<Record<string, unknown> | null> {
+  // Try multiple URL patterns — we don't know which one Kapso actually uses
+  const urlCandidates = [
+    `${KAPSO_BASE}/${mediaId}`,                                // Meta-style: /{mediaId}
+    `${KAPSO_BASE}/${phoneNumberId}/media/${mediaId}`,         // Alt: /{phoneNumberId}/media/{mediaId}
+    `https://api.kapso.ai/meta/whatsapp/${mediaId}`,           // Without version
+    `https://api.kapso.ai/whatsapp/media/${mediaId}`,          // Kapso-native
+  ];
+
+  for (const url of urlCandidates) {
+    try {
+      logger.info({ url, mediaId }, "Kapso: trying media info URL");
+      const res = await fetch(url, { headers: { "X-API-Key": apiKey } });
+      if (res.ok) {
+        const json = await res.json() as Record<string, unknown>;
+        logger.info({ url, mediaId, keys: Object.keys(json), hasUrl: !!json["url"] }, "Kapso media info SUCCESS");
+        return json;
+      }
+      const errBody = await res.text().catch(() => "");
+      logger.warn({ url, mediaId, status: res.status, body: errBody.slice(0, 200) }, "Kapso media info attempt failed");
+    } catch (err) {
+      logger.warn({ url, mediaId, err }, "Kapso media info attempt exception");
+    }
+  }
+  return null;
+}
+
 async function downloadKapsoMedia(
   phoneNumberId: string,
   mediaId: string,
   apiKey: string,
+  directUrl?: string,
 ): Promise<Uint8Array | null> {
   try {
-    // Meta-style: GET /{mediaId} — the media ID is a top-level resource
-    const infoUrl = `${KAPSO_BASE}/${mediaId}`;
-    logger.info({ infoUrl, mediaId, phoneNumberId }, "Kapso: fetching media info");
+    let downloadUrl = directUrl;
 
-    const metaRes = await fetch(infoUrl, {
-      headers: { "X-API-Key": apiKey },
-    });
-
-    if (!metaRes.ok) {
-      const errBody = await metaRes.text().catch(() => "");
-      logger.error({ mediaId, status: metaRes.status, url: infoUrl, body: errBody.slice(0, 300) }, "Kapso media info fetch failed");
-      return null;
-    }
-
-    const meta = await metaRes.json() as Record<string, unknown>;
-    logger.info({ mediaId, metaKeys: Object.keys(meta), url: meta["url"] ? "present" : "missing" }, "Kapso media info response");
-
-    const downloadUrl = meta["url"] as string | undefined;
+    // If no direct URL from webhook payload, fetch media info to get it
     if (!downloadUrl) {
-      logger.error({ mediaId, meta: JSON.stringify(meta).slice(0, 300) }, "Kapso media info missing url field");
-      return null;
+      const meta = await fetchKapsoMediaInfo(phoneNumberId, mediaId, apiKey);
+      if (!meta) {
+        logger.error({ mediaId, phoneNumberId }, "All Kapso media info URL patterns failed");
+        return null;
+      }
+      downloadUrl = (meta["url"] ?? meta["link"] ?? meta["download_url"] ?? meta["media_url"]) as string | undefined;
+      if (!downloadUrl) {
+        logger.error({ mediaId, meta: JSON.stringify(meta).slice(0, 500) }, "Kapso media info has no download URL field");
+        return null;
+      }
     }
 
-    logger.info({ mediaId, downloadUrl: downloadUrl.slice(0, 100) }, "Kapso: downloading binary");
+    logger.info({ mediaId, downloadUrl: downloadUrl.slice(0, 120) }, "Kapso: downloading binary");
 
     const binaryRes = await fetch(downloadUrl, {
       headers: { "X-API-Key": apiKey },
     });
     if (!binaryRes.ok) {
-      const errBody = await binaryRes.text().catch(() => "");
-      logger.error({ mediaId, status: binaryRes.status, body: errBody.slice(0, 300) }, "Kapso media binary download failed");
-      return null;
+      // Some providers don't need auth for the download URL — retry without
+      logger.warn({ mediaId, status: binaryRes.status }, "Binary download with API key failed, retrying without auth");
+      const retryRes = await fetch(downloadUrl);
+      if (!retryRes.ok) {
+        const errBody = await retryRes.text().catch(() => "");
+        logger.error({ mediaId, status: retryRes.status, body: errBody.slice(0, 300) }, "Kapso media binary download failed (both with and without auth)");
+        return null;
+      }
+      const buffer = await retryRes.arrayBuffer();
+      logger.info({ mediaId, bytes: buffer.byteLength }, "Kapso media binary downloaded (no auth)");
+      return new Uint8Array(buffer);
     }
 
     const buffer = await binaryRes.arrayBuffer();
@@ -173,28 +210,33 @@ export function createWebhookController(
 
       // Determine prompt text (caption for media, body for text)
       let body: string | undefined;
-      let mediaInfo: { mediaId: string; mimeType: string; filename?: string } | undefined;
+      let mediaInfo: { mediaId: string; mimeType: string; filename?: string; directUrl?: string } | undefined;
 
       if (msgType === "text" || textObj) {
         body = textObj?.["body"] as string | undefined;
         if (!body) continue;
       } else if (msgType === "image" || imageObj) {
         const img = imageObj ?? (message["image"] as Record<string, unknown>);
+        logger.info({ imagePayload: JSON.stringify(img).slice(0, 500) }, "RAW image object from Kapso webhook");
         const mediaId = img?.["id"] as string | undefined;
         const mimeType = (img?.["mime_type"] as string | undefined) ?? "image/jpeg";
         const caption = img?.["caption"] as string | undefined;
+        // Some providers include a direct download URL in the webhook payload
+        const directUrl = (img?.["url"] ?? img?.["link"]) as string | undefined;
         if (!mediaId) continue;
         body = caption || "[El usuario envió una imagen]";
-        mediaInfo = { mediaId, mimeType };
+        mediaInfo = { mediaId, mimeType, ...(directUrl ? { directUrl } : {}) };
       } else if (msgType === "document" || documentObj) {
         const doc = documentObj ?? (message["document"] as Record<string, unknown>);
+        logger.info({ docPayload: JSON.stringify(doc).slice(0, 500) }, "RAW document object from Kapso webhook");
         const mediaId = doc?.["id"] as string | undefined;
         const mimeType = (doc?.["mime_type"] as string | undefined) ?? "application/pdf";
         const caption = doc?.["caption"] as string | undefined;
         const filename = doc?.["filename"] as string | undefined;
+        const directUrl = (doc?.["url"] ?? doc?.["link"]) as string | undefined;
         if (!mediaId) continue;
         body = caption || `[El usuario envió un documento${filename ? `: ${filename}` : ""}]`;
-        mediaInfo = filename ? { mediaId, mimeType, filename } : { mediaId, mimeType };
+        mediaInfo = { mediaId, mimeType, ...(filename ? { filename } : {}), ...(directUrl ? { directUrl } : {}) };
       } else {
         // Unsupported message type (voice, sticker, location, etc.) — skip silently
         logger.debug({ msgType, messageId }, "Unsupported message type — skipping");
@@ -271,7 +313,7 @@ export function createWebhookController(
     messageId: string,
     phoneNumberId: string,
     customerPhone: string,
-    mediaInfo?: { mediaId: string; mimeType: string; filename?: string },
+    mediaInfo?: { mediaId: string; mimeType: string; filename?: string; directUrl?: string },
   ): Promise<void> {
     // Resolve user by their phone number
     const user = await userRepo.findByPhone(customerPhone);
@@ -293,8 +335,8 @@ export function createWebhookController(
 
     if (mediaInfo) {
       const kapsoApiKey = process.env["KAPSO_API_KEY"] ?? "";
-      logger.info({ phoneNumberId, mediaId: mediaInfo.mediaId, mimeType: mediaInfo.mimeType, hasApiKey: !!kapsoApiKey }, "Attempting Kapso media download");
-      const data = await downloadKapsoMedia(phoneNumberId, mediaInfo.mediaId, kapsoApiKey);
+      logger.info({ phoneNumberId, mediaId: mediaInfo.mediaId, mimeType: mediaInfo.mimeType, hasApiKey: !!kapsoApiKey, hasDirectUrl: !!mediaInfo.directUrl }, "Attempting Kapso media download");
+      const data = await downloadKapsoMedia(phoneNumberId, mediaInfo.mediaId, kapsoApiKey, mediaInfo.directUrl);
       if (data) {
         const attachment: MediaAttachment = { data, mimeType: mediaInfo.mimeType };
         if (mediaInfo.filename) attachment.filename = mediaInfo.filename;
