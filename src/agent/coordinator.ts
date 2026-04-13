@@ -110,6 +110,7 @@ Rules:
 3. For price lookups, catalog queries, product management → delegate to delegateTo_catalog-manager.
 4. For quote/budget generation (when client data is involved or a PDF is needed) → delegate to delegateTo_quote.
 5. For YouTube video searches or video details → delegate to delegateTo_youtube.
+5b. IMAGES OF RECEIPTS/INVOICES/TICKETS: When the user sends an image (message contains "[El usuario envió una imagen]" or "[El usuario envió un documento]") → ALWAYS delegate to delegateTo_expenses. The expenses agent will receive the image directly and extract the data itself. Pass the user's message as-is in the query — do NOT attempt to extract or describe the image yourself.
 6. For email-related requests (list, read, search, send emails, send with attachments) → delegate to delegateTo_gmail.
    When delegating to delegateTo_gmail, ALWAYS include ALL available context: recipient, purpose/topic of the email,
    and any attachment filename if applicable. Pass the user's intent as-is — do NOT assume it's about quotes or any specific topic.

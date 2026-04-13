@@ -8,6 +8,7 @@ import type { UserRepository } from "../../domain/ports/repositories/user.reposi
 import type { WhatsAppChannel } from "../../domain/ports/whatsapp-channel.js";
 import type { AttachmentStore } from "../../domain/ports/attachment-store.js";
 import type { MediaAttachment } from "../../agent/types.js";
+import { storePendingMedia } from "../../agent/pending-media.js";
 import { createAgentContext } from "../../application/agent-context.js";
 import { loadConversationHistory } from "../../agent/load-history.js";
 import { loadMemoryContext } from "../../agent/load-memories.js";
@@ -300,6 +301,11 @@ export function createWebhookController(
     const experimental_context = createAgentContext({ userId, orgId, conversationId });
     const memoryMessages = await loadMemoryContext(memoryManager, orgId);
     const history = await loadConversationHistory(convManager, conversationId);
+
+    // Store attachments so delegation tools can forward them to sub-agents
+    if (attachments) {
+      storePendingMedia(conversationId, attachments);
+    }
 
     // Run agent (multimodal if attachments present)
     const result = await agent.generate({
