@@ -155,6 +155,13 @@
       "when": 1776093360254,
       "tag": "0021_add-expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1776268492119,
+      "tag": "0022_add-business-logic-url",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,4 @@
 import { tool } from "ai";
-import { z } from "zod";
 import type { CatalogService } from "../services/catalog.service.js";
 import type { PdfService, CompanyDetails } from "../services/pdf.service.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
@@ -50,25 +49,29 @@ function resolveCompanyDetails(
 }
 
 export function createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo, quoteRepo, strategyRegistry }: CalculateBudgetDeps) {
-  // Use default strategy for schema and description (at tool creation time)
-  const strategy = strategyRegistry.getDefault();
+  // Default strategy provides the initial schema/description at tool creation time.
+  // At runtime, the actual strategy is resolved per-org (local or remote).
+  const defaultStrategy = strategyRegistry.getDefault();
 
   return tool({
-    description: strategy.getToolDescription(),
+    description: defaultStrategy.getToolDescription(),
 
-    inputSchema: strategy.getInputSchema(),
+    inputSchema: defaultStrategy.getInputSchema(),
 
-    execute: async ({ clientName, clientAddress, province, areaM2, surfaceType, perimeterLm, sacasAridos, applyVat }, { experimental_context }) => {
+    execute: async (input, { experimental_context }) => {
       const orgId = getAgentContextValue({ experimental_context }, "orgId");
       if (!orgId) {
         return {
-          success: false, clientName, areaM2: 0, surfaceType: "",
-          rows: [], pdfGenerated: false, filename: "",
+          success: false, clientName: "", rows: [], pdfGenerated: false, filename: "",
           error: "Missing orgId in request context",
         };
       }
 
       const userId = getAgentContextValue({ experimental_context }, "userId");
+      const strategyInput = input as Record<string, unknown>;
+      const clientName = (strategyInput["clientName"] as string) ?? "";
+      const clientAddress = (strategyInput["clientAddress"] as string) ?? "";
+      const province = (strategyInput["province"] as string) ?? "";
 
       // Fetch org data and catalog in parallel
       const [org, activeCatalog] = await Promise.all([
@@ -78,23 +81,17 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
 
       if (!activeCatalog) {
         return {
-          success: false, clientName, areaM2, surfaceType,
-          rows: [], pdfGenerated: false, filename: "",
+          success: false, clientName, rows: [], pdfGenerated: false, filename: "",
           error: "No active catalog found for this organization",
         };
       }
 
-      // Resolve strategy from catalog's businessType
-      const activeStrategy = strategyRegistry.resolve(activeCatalog.businessType);
+      // Resolve strategy: remote (if org has businessLogicUrl) or local (by catalog businessType)
+      const activeStrategy = await strategyRegistry.resolveForOrg(org, activeCatalog.businessType);
       const company = resolveCompanyDetails(org);
       const footer = resolveQuoteFooter(org);
 
-      // Pack all input fields for the strategy
-      const strategyInput: Record<string, unknown> = {
-        clientName, clientAddress, province, areaM2, surfaceType, perimeterLm, sacasAridos, applyVat,
-      };
-
-      // Delegate calculation to the strategy
+      // Delegate calculation to the strategy — it knows its own input fields
       let result;
       try {
         result = await activeStrategy.calculate({
@@ -106,8 +103,7 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         });
       } catch (err) {
         return {
-          success: false, clientName, areaM2, surfaceType,
-          rows: [], pdfGenerated: false, filename: "",
+          success: false, clientName, rows: [], pdfGenerated: false, filename: "",
           error: err instanceof Error ? err.message : String(err),
         };
       }
@@ -125,7 +121,7 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         company,
         clientName,
         clientAddress,
-        province: province ?? "",
+        province,
         result,
         pdfService,
         footer,
@@ -169,16 +165,14 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         });
       }
 
-      // Build response (same shape as before for backward compat)
+      // Build generic response — strategy-specific fields live in rows
       return {
         success: true,
         clientName,
-        areaM2,
-        surfaceType,
         rows: result.rows.map((r) => ({
-          grassName: r.itemName,
-          pricePerM2: r.breakdown["pricePerM2"] ?? 0,
-          totalConIva: r.total,
+          itemName: r.itemName,
+          breakdown: r.breakdown,
+          total: r.total,
         })),
         pdfGenerated: !!pdfBase64,
         filename,

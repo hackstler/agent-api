@@ -212,6 +212,8 @@ export interface Organization {
   features: OrgFeatures | null;
   quoteSettings: QuoteSettings | null;
   whatsappPhoneNumberId: string | null;
+  businessLogicUrl: string | null;
+  businessLogicApiKey: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
@@ -233,6 +235,8 @@ export interface NewOrganization {
   features?: OrgFeatures | null | undefined;
   quoteSettings?: QuoteSettings | null | undefined;
   whatsappPhoneNumberId?: string | null | undefined;
+  businessLogicUrl?: string | null | undefined;
+  businessLogicApiKey?: string | null | undefined;
   metadata?: Record<string, unknown> | null | undefined;
   createdAt?: Date | undefined;
   updatedAt?: Date | undefined;
@@ -500,4 +504,5 @@ export interface ExpenseSummary {
   totalVat: number;
   count: number;
   byVendor: { vendor: string; total: number; count: number }[];
+  byMonth: { month: string; total: number; vat: number; count: number }[];
 }
