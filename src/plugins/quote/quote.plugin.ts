@@ -36,7 +36,7 @@ export class QuotePlugin implements Plugin {
     const listCatalog = createListCatalogTool({ catalogService, organizationRepo, strategyRegistry });
     const listQuotes = createListQuotesTool({ quoteRepo });
 
-    this.description = "Generates price quotes and PDF documents. Supports multiple business types via local strategies or remote business functions. Can also list previously generated quotes.";
+    this.description = `Generates price quotes and PDF invoices for ${defaultStrategy.displayName}. Can also list previously generated quotes.`;
     this.tools = { calculateBudget, listCatalog, listQuotes };
     this.agent = createQuoteAgent(this.tools, defaultStrategy);
   }
