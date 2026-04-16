@@ -44,6 +44,8 @@ export interface UpdateOrgDto {
   currency?: string | undefined;
   features?: import("../../domain/entities/index.js").OrgFeatures | null | undefined;
   quoteSettings?: import("../../domain/entities/index.js").QuoteSettings | null | undefined;
+  businessLogicUrl?: string | null | undefined;
+  businessLogicApiKey?: string | null | undefined;
   metadata?: Record<string, unknown> | null | undefined;
 }
 
@@ -117,6 +119,8 @@ export class OrganizationManager {
     if (normalized.email !== undefined) normalized.email = normalized.email?.trim().toLowerCase() || null;
     if (normalized.nif !== undefined) normalized.nif = normalized.nif?.trim() || null;
     if (normalized.currency !== undefined) normalized.currency = normalized.currency?.trim();
+    if (normalized.businessLogicUrl !== undefined) normalized.businessLogicUrl = normalized.businessLogicUrl?.trim() || null;
+    if (normalized.businessLogicApiKey !== undefined) normalized.businessLogicApiKey = normalized.businessLogicApiKey?.trim() || null;
     return this.orgRepo.update(orgId, normalized);
   }
 

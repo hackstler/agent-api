@@ -91,6 +91,17 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
       const company = resolveCompanyDetails(org);
       const footer = resolveQuoteFooter(org);
 
+      logger.info(
+        {
+          orgId,
+          userId,
+          strategy: activeStrategy.businessType,
+          isRemote: !!(org?.businessLogicUrl && org.businessLogicApiKey),
+          catalogBusinessType: activeCatalog.businessType,
+        },
+        "[calculateBudget] strategy resolved",
+      );
+
       // Delegate calculation to the strategy — it knows its own input fields
       let result;
       try {
@@ -101,7 +112,17 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
           catalogService,
           catalogSettings: activeCatalog.settings,
         });
+        logger.info(
+          {
+            orgId,
+            rowsCount: result.rows.length,
+            firstRow: result.rows[0],
+            representativeTotals: result.representativeTotals,
+          },
+          "[calculateBudget] calculate() returned",
+        );
       } catch (err) {
+        logger.error({ err, orgId }, "[calculateBudget] calculate() failed");
         return {
           success: false, clientName, rows: [], pdfGenerated: false, filename: "",
           error: err instanceof Error ? err.message : String(err),
@@ -115,17 +136,36 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
       const filename = `${quoteNumber}.pdf`;
 
       // Delegate PDF generation to the strategy
-      const pdfBase64 = await activeStrategy.generatePdf({
-        quoteNumber,
-        date: dateStr,
-        company,
-        clientName,
-        clientAddress,
-        province,
-        result,
-        pdfService,
-        footer,
-      });
+      let pdfBase64: string | undefined;
+      try {
+        pdfBase64 = await activeStrategy.generatePdf({
+          quoteNumber,
+          date: dateStr,
+          company,
+          clientName,
+          clientAddress,
+          province,
+          result,
+          pdfService,
+          footer,
+        });
+        logger.info(
+          {
+            orgId,
+            userId,
+            quoteNumber,
+            filename,
+            pdfKB: pdfBase64 ? Math.round(pdfBase64.length / 1024) : 0,
+          },
+          "[calculateBudget] generatePdf() returned",
+        );
+      } catch (err) {
+        logger.error({ err, orgId, quoteNumber }, "[calculateBudget] generatePdf() failed");
+        return {
+          success: false, clientName, rows: [], pdfGenerated: false, filename: "",
+          error: err instanceof Error ? `PDF error: ${err.message}` : String(err),
+        };
+      }
 
       // Persist quote to DB FIRST (we need quote.id as sourceId for the attachment)
       let quoteId: string | undefined;
@@ -147,33 +187,77 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
             ...result.extraColumns,
           });
           quoteId = quote.id;
+          logger.info({ quoteId, quoteNumber, filename }, "[calculateBudget] quote persisted to DB");
         } catch (err) {
-          logger.error({ err }, "Failed to persist quote");
+          logger.error({ err, quoteNumber }, "[calculateBudget] Failed to persist quote");
         }
+      } else {
+        logger.warn({ orgId, userId }, "[calculateBudget] skipping quote persist — missing userId/orgId");
       }
 
-      // Store in AttachmentStore (persistent: memory + DB)
+      // Store in AttachmentStore (persistent: memory + DB) — critical for WhatsApp delivery
+      let attachmentStored = false;
       if (pdfBase64 && userId) {
-        const pdfAttachment = { base64: pdfBase64, mimetype: "application/pdf", filename };
-        await attachmentStore.store({
+        try {
+          const pdfAttachment = { base64: pdfBase64, mimetype: "application/pdf", filename };
+          await attachmentStore.store({
+            orgId,
+            userId,
+            filename,
+            attachment: pdfAttachment,
+            docType: "quote",
+            ...(quoteId ? { sourceId: quoteId } : {}),
+          });
+          attachmentStored = true;
+          logger.info(
+            { orgId, userId, filename, quoteId },
+            "[calculateBudget] PDF stored in AttachmentStore (cache + DB)",
+          );
+        } catch (err) {
+          logger.error(
+            { err, orgId, userId, filename },
+            "[calculateBudget] attachmentStore.store failed — PDF will NOT be deliverable via WhatsApp",
+          );
+        }
+      } else {
+        logger.warn(
+          { hasPdf: !!pdfBase64, userId },
+          "[calculateBudget] skipping attachmentStore — no PDF or no userId",
+        );
+      }
+
+      // Build response — flatten breakdown onto row so the LLM has direct access to
+      // strategy-specific fields (pricePerM2, etc.) without nested lookup. This keeps
+      // the summary the agent produces detailed enough (e.g. "TESSA25: 3.807,93 €").
+      const rows = result.rows.map((r) => ({
+        itemName: r.itemName,
+        ...r.breakdown,
+        subtotal: r.subtotal,
+        vat: r.vat,
+        total: r.total,
+      }));
+
+      logger.info(
+        {
           orgId,
           userId,
+          success: true,
+          pdfGenerated: !!pdfBase64,
+          attachmentStored,
           filename,
-          attachment: pdfAttachment,
-          docType: "quote",
-          ...(quoteId ? { sourceId: quoteId } : {}),
-        });
-      }
+          rowsCount: rows.length,
+        },
+        "[calculateBudget] tool returning result",
+      );
 
-      // Build generic response — strategy-specific fields live in rows
       return {
         success: true,
         clientName,
-        rows: result.rows.map((r) => ({
-          itemName: r.itemName,
-          breakdown: r.breakdown,
-          total: r.total,
-        })),
+        sectionTitle: result.sectionTitle,
+        notes: result.notes,
+        rows,
+        representativeTotals: result.representativeTotals,
+        extraColumns: result.extraColumns,
         pdfGenerated: !!pdfBase64,
         filename,
       };

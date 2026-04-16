@@ -60,6 +60,8 @@ const updateOrgValidator = z.object({
   vatRate: z.number().min(0).max(1).optional().nullable(),
   currency: z.string().max(10).optional(),
   quoteSettings: quoteSettingsValidator,
+  businessLogicUrl: z.string().url().max(2000).optional().nullable().or(z.literal("")),
+  businessLogicApiKey: z.string().max(500).optional().nullable(),
   metadata: z.record(z.unknown()).optional().nullable(),
 });
 

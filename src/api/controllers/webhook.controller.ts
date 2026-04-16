@@ -414,17 +414,35 @@ export function createWebhookController(
     );
     if (!delegatedToGmail) {
       const filename = findPdfFilename(result);
+      logger.info(
+        { filename, userId, hasFilename: !!filename },
+        "[webhook] PDF detection phase",
+      );
       if (filename) {
         const stored = await attachmentStore.retrieve(userId, filename);
         if (stored) {
-          await whatsapp.sendDocument(phoneNumberId, customerPhone, {
-            base64: stored.base64,
-            mimetype: stored.mimetype,
-            filename: stored.filename,
-          });
-          logger.info({ filename: stored.filename }, "PDF sent via Kapso webhook");
+          try {
+            await whatsapp.sendDocument(phoneNumberId, customerPhone, {
+              base64: stored.base64,
+              mimetype: stored.mimetype,
+              filename: stored.filename,
+            });
+            logger.info(
+              { filename: stored.filename, pdfKB: Math.round(stored.base64.length / 1024) },
+              "[webhook] PDF sent via Kapso",
+            );
+          } catch (err) {
+            logger.error({ err, filename: stored.filename }, "[webhook] Failed to send PDF via Kapso");
+          }
+        } else {
+          logger.warn(
+            { filename, userId },
+            "[webhook] PDF filename found in agent result but NOT in AttachmentStore — attachment lost",
+          );
         }
       }
+    } else {
+      logger.info("[webhook] PDF skipped — Gmail delegation detected");
     }
   }
 
