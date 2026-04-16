@@ -1,4 +1,4 @@
-import { and, gte, lte, eq, sum, count, desc } from "drizzle-orm";
+import { and, gte, lte, eq, sum, count, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { expenses } from "../db/schema.js";
 import type { ExpenseRow } from "../db/schema.js";
@@ -75,6 +75,19 @@ export class DrizzleExpenseRepository implements ExpenseRepository {
       .groupBy(expenses.vendor)
       .orderBy(desc(sum(expenses.amount)));
 
+    // Per-month breakdown
+    const monthRows = await db
+      .select({
+        month: sql<string>`to_char(${expenses.date}::date, 'YYYY-MM')`,
+        total: sum(expenses.amount),
+        vat: sum(expenses.vatAmount),
+        count: count(),
+      })
+      .from(expenses)
+      .where(where)
+      .groupBy(sql`to_char(${expenses.date}::date, 'YYYY-MM')`)
+      .orderBy(sql`to_char(${expenses.date}::date, 'YYYY-MM')`);
+
     return {
       totalAmount: Number(totals?.totalAmount ?? 0),
       totalVat: Number(totals?.totalVat ?? 0),
@@ -82,6 +95,12 @@ export class DrizzleExpenseRepository implements ExpenseRepository {
       byVendor: vendorRows.map((r) => ({
         vendor: r.vendor,
         total: Number(r.total ?? 0),
+        count: Number(r.count),
+      })),
+      byMonth: monthRows.map((r) => ({
+        month: r.month,
+        total: Number(r.total ?? 0),
+        vat: Number(r.vat ?? 0),
         count: Number(r.count),
       })),
     };
