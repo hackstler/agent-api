@@ -34,8 +34,6 @@ const defaultPermissions: Record<string, ToolPermission> = {
   readEmail: { level: "auto" },
   searchEmails: { level: "auto" },
   listEvents: { level: "auto" },
-  listCatalogs: { level: "auto" },
-  listCatalogItems: { level: "auto" },
   listCatalog: { level: "auto" },
   listQuotes: { level: "auto" },
   searchVideos: { level: "auto" },
@@ -53,7 +51,6 @@ const defaultPermissions: Record<string, ToolPermission> = {
   // so programmatic confirmation is NOT needed for it.
   // These tools execute actions that are harder to undo:
   deleteEvent: { level: "confirm", message: "¿Eliminar este evento del calendario?" },
-  deleteItem: { level: "confirm", message: "¿Eliminar este producto del catálogo?" },
 };
 
 /**

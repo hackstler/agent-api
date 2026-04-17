@@ -6,7 +6,6 @@ import {
   jsonb,
   integer,
   numeric,
-  boolean,
   index,
   uniqueIndex,
   pgEnum,
@@ -215,41 +214,6 @@ export const oauthTokens = pgTable(
   })
 );
 
-export const catalogs = pgTable("catalogs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  orgId: text("org_id").notNull(),
-  name: text("name").notNull(),
-  businessType: text("business_type").notNull().default("grass"),
-  effectiveDate: timestamp("effective_date", { withTimezone: true }).notNull(),
-  isActive: boolean("is_active").notNull().default(true),
-  settings: jsonb("settings").$type<Record<string, unknown>>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const catalogItems = pgTable(
-  "catalog_items",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    catalogId: uuid("catalog_id")
-      .notNull()
-      .references(() => catalogs.id, { onDelete: "cascade" }),
-    code: integer("code").notNull(),
-    name: text("name").notNull(),
-    description: text("description"),
-    category: text("category"),
-    pricePerUnit: numeric("price_per_unit", { precision: 10, scale: 2 }).notNull(),
-    unit: text("unit").notNull(),
-    sortOrder: integer("sort_order").notNull().default(0),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => ({
-    catalogIdx: index("catalog_items_catalog_id_idx").on(t.catalogId),
-    catalogCodeUq: uniqueIndex("catalog_items_catalog_code_uq").on(t.catalogId, t.code),
-  })
-);
-
 export const invitations = pgTable(
   "invitations",
   {
@@ -279,28 +243,6 @@ export interface QuoteLineItemJson {
   lineTotal: number;
 }
 
-// ── Grass comparison JSONB types (stored in quotes.quoteData) ─────────────────
-export interface GrassComparisonRowJson {
-  grassName: string;
-  pricePerM2: number;
-  totalGrassInstalled: number;
-  aridosTotal: number;
-  traviesasTotal: number;
-  baseImponible: number;
-  iva: number;
-  totalConIva: number;
-}
-
-export interface GrassQuoteDataJson {
-  areaM2: number;
-  surfaceType: "SOLADO" | "TIERRA";
-  perimeterLm: number;
-  sacasAridos: number;
-  rows: GrassComparisonRowJson[];
-  traviesasNote: string;
-  aridosNote?: string;
-}
-
 export const quotes = pgTable(
   "quotes",
   {
@@ -317,10 +259,6 @@ export const quotes = pgTable(
     pdfBase64: text("pdf_base64"),
     filename: text("filename").notNull(),
     quoteData: jsonb("quote_data").$type<Record<string, unknown> | null>(),
-    surfaceType: text("surface_type"),
-    areaM2: numeric("area_m2", { precision: 10, scale: 2 }),
-    perimeterLm: numeric("perimeter_lm", { precision: 10, scale: 2 }),
-    province: text("province"),
     // Deterministic hash of the calculateBudget input — used for idempotency.
     // Two quotes with identical inputs (same client + same params) produce the
     // same hash, allowing the tool to short-circuit the LLM-driven flow and
@@ -351,25 +289,6 @@ export const attachments = pgTable(
   (table) => ({
     userFilenameUq: uniqueIndex("attachments_user_filename_uq").on(table.userId, table.filename),
     userDocTypeIdx: index("attachments_user_doc_type_idx").on(table.userId, table.docType),
-  })
-);
-
-// ── Grass pricing lookup table (price/m² by grass type × surface × m²) ───────
-export const grassPricing = pgTable(
-  "grass_pricing",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    catalogItemId: uuid("catalog_item_id")
-      .notNull()
-      .references(() => catalogItems.id, { onDelete: "cascade" }),
-    surfaceType: text("surface_type").notNull(), // "SOLADO" | "TIERRA"
-    m2: integer("m2").notNull(), // 1-650
-    pricePerM2: numeric("price_per_m2", { precision: 10, scale: 2 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => ({
-    lookupIdx: index("grass_pricing_lookup_idx").on(t.catalogItemId, t.surfaceType, t.m2),
-    uniqueEntry: uniqueIndex("grass_pricing_unique_entry").on(t.catalogItemId, t.surfaceType, t.m2),
   })
 );
 
@@ -491,25 +410,6 @@ export const quotesRelations = relations(quotes, ({ one }) => ({
   user: one(users, { fields: [quotes.userId], references: [users.id] }),
 }));
 
-export const catalogsRelations = relations(catalogs, ({ many }) => ({
-  items: many(catalogItems),
-}));
-
-export const catalogItemsRelations = relations(catalogItems, ({ one, many }) => ({
-  catalog: one(catalogs, {
-    fields: [catalogItems.catalogId],
-    references: [catalogs.id],
-  }),
-  grassPrices: many(grassPricing),
-}));
-
-export const grassPricingRelations = relations(grassPricing, ({ one }) => ({
-  catalogItem: one(catalogItems, {
-    fields: [grassPricing.catalogItemId],
-    references: [catalogItems.id],
-  }),
-}));
-
 export const agentMemoriesRelations = relations(agentMemories, ({ one }) => ({
   user: one(users, { fields: [agentMemories.userId], references: [users.id] }),
 }));
@@ -536,16 +436,10 @@ export type WhatsappSession = typeof whatsappSessions.$inferSelect;
 export type NewWhatsappSession = typeof whatsappSessions.$inferInsert;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
 export type NewOAuthToken = typeof oauthTokens.$inferInsert;
-export type Catalog = typeof catalogs.$inferSelect;
-export type NewCatalog = typeof catalogs.$inferInsert;
-export type CatalogItem = typeof catalogItems.$inferSelect;
-export type NewCatalogItem = typeof catalogItems.$inferInsert;
 export type InvitationRow = typeof invitations.$inferSelect;
 export type NewInvitationRow = typeof invitations.$inferInsert;
 export type QuoteRow = typeof quotes.$inferSelect;
 export type NewQuoteRow = typeof quotes.$inferInsert;
-export type GrassPricingRow = typeof grassPricing.$inferSelect;
-export type NewGrassPricingRow = typeof grassPricing.$inferInsert;
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type NewAttachmentRow = typeof attachments.$inferInsert;
 export type AgentMemoryRow = typeof agentMemories.$inferSelect;

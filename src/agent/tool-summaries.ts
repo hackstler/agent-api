@@ -57,18 +57,7 @@ export function summarizeToolCall(tr: AgentToolResult): string {
     case "deleteEvent":
       return "Evento eliminado";
     case "listCatalog":
-    case "listCatalogs":
       return "Catálogo consultado";
-    case "listCatalogItems":
-      return "Productos consultados";
-    case "createCatalog":
-      return "Catálogo creado";
-    case "addItem":
-      return "Producto añadido";
-    case "updateItem":
-      return "Producto actualizado";
-    case "deleteItem":
-      return "Producto eliminado";
     case "searchVideos":
       return "Búsqueda de videos";
     case "getVideoDetails":

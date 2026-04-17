@@ -15,15 +15,15 @@ export function createMemoryTools(memoryManager: MemoryManager): AgentTools {
   const saveMemory = tool({
     description: `Save a memory or learning for future conversations.
 Use this to remember:
-- Client preferences: "Cliente X siempre pide césped de 40mm", "Cliente Y quiere presupuestos sin IVA"
-- Product insights: "El césped Premium tiene más demanda en verano"
+- Client preferences: "Cliente X siempre pide la opción premium", "Cliente Y quiere presupuestos sin IVA"
+- Product/service insights: "El producto X tiene más demanda en verano"
 - Workflow patterns: "Para pedidos grandes, siempre consultar stock antes"
 - User preferences: "El vendedor Pedro prefiere respuestas breves"
 
 Do NOT save trivial or one-time information. Only save learnings that will be useful in future conversations.
 If a memory with the same key already exists, it will be updated.`,
     inputSchema: z.object({
-      key: z.string().min(1).max(200).describe("Short descriptive key, e.g. 'cliente_juan_cesped_preferido'"),
+      key: z.string().min(1).max(200).describe("Short descriptive key, e.g. 'cliente_juan_pref'"),
       content: z.string().min(1).max(2000).describe("The memory content to save"),
       type: z.enum(MEMORY_TYPES).describe("Category: client_pref, product_insight, workflow_pattern, user_pref"),
     }),

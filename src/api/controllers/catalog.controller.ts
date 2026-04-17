@@ -1,265 +1,143 @@
 import { Hono } from "hono";
-import { z } from "zod";
-import type { CatalogManager } from "../../application/managers/catalog.manager.js";
+import type { Context } from "hono";
 import type { OrganizationRepository } from "../../domain/ports/repositories/organization.repository.js";
+import { QuoteStrategyRegistry, RemoteQuoteStrategy } from "../../plugins/quote/strategies/index.js";
+import { logger } from "../../shared/logger.js";
 
-const createCatalogValidator = z.object({
-  name: z.string().min(1).max(200),
-  effectiveDate: z.string().datetime(),
-  isActive: z.boolean().optional(),
-  orgId: z.string().min(1).optional(), // super_admin can target a different org
-});
-
-const updateCatalogValidator = z.object({
-  name: z.string().min(1).max(200).optional(),
-  effectiveDate: z.string().datetime().optional(),
-  isActive: z.boolean().optional(),
-});
-
-const createItemValidator = z.object({
-  code: z.number().int().positive().optional(),
-  name: z.string().min(1).max(200),
-  description: z.string().max(1000).nullable().optional(),
-  category: z.string().max(100).nullable().optional(),
-  pricePerUnit: z.number().positive(),
-  unit: z.string().min(1).max(50),
-  sortOrder: z.number().int().nonnegative().optional(),
-  isActive: z.boolean().optional(),
-});
-
-const updateItemValidator = z.object({
-  code: z.number().int().positive().optional(),
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().max(1000).nullable().optional(),
-  category: z.string().max(100).nullable().optional(),
-  pricePerUnit: z.number().positive().optional(),
-  unit: z.string().min(1).max(50).optional(),
-  sortOrder: z.number().int().nonnegative().optional(),
-  isActive: z.boolean().optional(),
-});
-
-const pricingImportValidator = z.object({
-  grassTypes: z.array(z.object({
-    name: z.string().min(1),
-    code: z.number().int().positive(),
-    description: z.string().default(""),
-    sortOrder: z.number().int().nonnegative().default(0),
-    category: z.string().default("césped artificial"),
-    unit: z.string().default("m²"),
-  })),
-  pricing: z.array(z.object({
-    grassName: z.string().min(1),
-    surfaceType: z.enum(["SOLADO", "TIERRA"]),
-    m2: z.number().int().positive(),
-    pricePerM2: z.number().positive(),
-  })),
-});
-
-export function createCatalogController(manager: CatalogManager, orgRepo?: OrganizationRepository): Hono {
+/**
+ * Catalog controller — READ-ONLY PROXY to the per-org remote business function.
+ *
+ * After the decoupling: the platform no longer stores catalog data. Each org
+ * configures its own business function (businessLogicUrl + businessLogicApiKey),
+ * and that function exposes the catalog via GET /catalog.
+ *
+ * The dashboard still wants to render a catalog browser, so we expose:
+ *   - GET /admin/catalogs            → returns a single virtual catalog row
+ *                                      that represents the remote endpoint.
+ *   - GET /admin/catalogs/:id/items  → proxies the remote /catalog response.
+ *
+ * All write endpoints (POST/PATCH/DELETE) return 410 Gone — catalog mutation
+ * happens in the business function deployment, not in agent-api.
+ */
+export function createCatalogController(orgRepo: OrganizationRepository): Hono {
   const router = new Hono();
+  const registry = new QuoteStrategyRegistry();
 
-  /**
-   * For super_admin: resolve the catalog's actual orgId by looking it up by ID.
-   * For regular users: return their own orgId from the token.
-   * This allows super_admin to operate on catalogs from any org.
-   */
-  async function resolveOrgId(
-    user: { orgId: string; role: string },
-    catalogId: string,
-  ): Promise<string> {
-    if (user.role === "super_admin") {
-      const catalog = await manager.getCatalogById(catalogId);
-      return catalog.orgId;
-    }
-    return user.orgId;
-  }
+  const VIRTUAL_CATALOG_ID = "remote";
 
-  // ── Catalogs ──────────────────────────────────────────────────────────────
-
+  // ── List virtual catalogs ─────────────────────────────────────────────────
   router.get("/", async (c) => {
-    const user = c.get("user");
-    const orgId = user?.orgId;
-    if (!orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-
-    // Super admin sees all catalogs with org names
-    if (user?.role === "super_admin") {
-      const rows = await manager.listAllCatalogs();
-
-      // Resolve org names
-      const uniqueOrgIds = [...new Set(rows.map((r) => r.orgId))];
-      const orgNameMap = new Map<string, string | null>();
-      if (orgRepo) {
-        await Promise.all(
-          uniqueOrgIds.map(async (oid) => {
-            const org = await orgRepo.findByOrgId(oid);
-            orgNameMap.set(oid, org?.name ?? null);
-          }),
-        );
-      }
-
-      const enriched = rows.map((r) => ({ ...r, orgName: orgNameMap.get(r.orgId) ?? null }));
-      return c.json({ items: enriched, total: enriched.length });
-    }
-
-    const rows = await manager.listCatalogs(orgId);
-    return c.json({ items: rows, total: rows.length });
-  });
-
-  router.post("/", async (c) => {
     const user = c.get("user");
     if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
 
-    const body = await c.req.json().catch(() => null);
-    const parsed = createCatalogValidator.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
+    try {
+      const org = await orgRepo.findByOrgId(user.orgId);
+      if (!org?.businessLogicUrl || !org.businessLogicApiKey) {
+        return c.json({ items: [], total: 0 });
+      }
 
-    // super_admin can target a different org
-    const orgId = (user.role === "super_admin" && parsed.data.orgId) ? parsed.data.orgId : user.orgId;
+      const strategy = await registry.resolveForOrg(org);
+      const now = new Date().toISOString();
 
-    const catalog = await manager.createCatalog(orgId, {
-      name: parsed.data.name,
-      effectiveDate: new Date(parsed.data.effectiveDate),
-      isActive: parsed.data.isActive,
-    });
-    return c.json(catalog, 201);
+      const virtual = {
+        id: VIRTUAL_CATALOG_ID,
+        orgId: org.orgId,
+        name: `Catálogo remoto · ${strategy.displayName}`,
+        effectiveDate: now,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        orgName: org.name ?? null,
+      };
+
+      return c.json({ items: [virtual], total: 1 });
+    } catch (err) {
+      logger.warn({ err, orgId: user.orgId }, "[catalog.controller] list failed");
+      return c.json({ items: [], total: 0 });
+    }
   });
 
+  // ── Get virtual catalog ───────────────────────────────────────────────────
   router.get("/:catalogId", async (c) => {
     const user = c.get("user");
     if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-    const catalogId = c.req.param("catalogId");
-    const orgId = await resolveOrgId(user, catalogId);
-    const catalog = await manager.getCatalog(orgId, catalogId);
-    return c.json(catalog);
+
+    const org = await orgRepo.findByOrgId(user.orgId);
+    if (!org?.businessLogicUrl || !org.businessLogicApiKey) {
+      return c.json({ error: "NotFound", message: "No business function configured for this org" }, 404);
+    }
+
+    const strategy = await registry.resolveForOrg(org);
+    const now = new Date().toISOString();
+    return c.json({
+      id: VIRTUAL_CATALOG_ID,
+      orgId: org.orgId,
+      name: `Catálogo remoto · ${strategy.displayName}`,
+      effectiveDate: now,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
   });
 
-  router.patch("/:catalogId", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-
-    const catalogId = c.req.param("catalogId");
-    const body = await c.req.json().catch(() => null);
-    const parsed = updateCatalogValidator.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
-
-    const dto: Record<string, unknown> = {};
-    if (parsed.data.name !== undefined) dto["name"] = parsed.data.name;
-    if (parsed.data.effectiveDate !== undefined) dto["effectiveDate"] = new Date(parsed.data.effectiveDate);
-    if (parsed.data.isActive !== undefined) dto["isActive"] = parsed.data.isActive;
-    if (Object.keys(dto).length === 0) return c.json({ error: "Validation", message: "No fields to update" }, 400);
-
-    const orgId = await resolveOrgId(user, catalogId);
-    const updated = await manager.updateCatalog(orgId, catalogId, dto as Parameters<typeof manager.updateCatalog>[2]);
-    return c.json(updated);
-  });
-
-  router.delete("/:catalogId", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-    const catalogId = c.req.param("catalogId");
-    const orgId = await resolveOrgId(user, catalogId);
-    await manager.deleteCatalog(orgId, catalogId);
-    return c.json({ id: catalogId });
-  });
-
-  router.post("/:catalogId/activate", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-    const catalogId = c.req.param("catalogId");
-    const orgId = await resolveOrgId(user, catalogId);
-    const catalog = await manager.activateCatalog(orgId, catalogId);
-    return c.json(catalog);
-  });
-
-  // ── Items ─────────────────────────────────────────────────────────────────
-
+  // ── List items (proxy to remote /catalog) ─────────────────────────────────
   router.get("/:catalogId/items", async (c) => {
     const user = c.get("user");
     if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-    const catalogId = c.req.param("catalogId");
-    const orgId = await resolveOrgId(user, catalogId);
-    const rows = await manager.listItems(orgId, catalogId);
-    const priceRanges = await manager.getItemPriceRanges(catalogId);
 
-    const enriched = rows.map((item) => {
-      const range = priceRanges.get(item.id);
-      return range ? { ...item, priceRange: range } : item;
-    });
+    const org = await orgRepo.findByOrgId(user.orgId);
+    if (!org?.businessLogicUrl || !org.businessLogicApiKey) {
+      return c.json({ items: [], total: 0 });
+    }
 
-    return c.json({ items: enriched, total: enriched.length });
+    const strategy = await registry.resolveForOrg(org);
+    if (!(strategy instanceof RemoteQuoteStrategy)) {
+      return c.json({ items: [], total: 0 });
+    }
+
+    const remoteItems = await strategy.fetchCatalog();
+    const now = new Date().toISOString();
+
+    // Map remote catalog item shape → dashboard CatalogItemData shape.
+    // Pricing is intentionally hidden here: it lives in the business function
+    // and is computed dynamically per quote, so we don't expose static prices.
+    const items = remoteItems.map((item, idx) => ({
+      id: `remote:${item.code}`,
+      catalogId: VIRTUAL_CATALOG_ID,
+      code: Number.isFinite(Number(item.code)) ? Number(item.code) : idx + 1,
+      name: item.name,
+      description: item.description ?? null,
+      category: item.category ?? null,
+      pricePerUnit: "0.00",
+      unit: item.unit ?? "u",
+      sortOrder: idx,
+      isActive: true,
+      createdAt: now,
+    }));
+
+    return c.json({ items, total: items.length });
   });
 
-  router.post("/:catalogId/items", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
+  // ── All write endpoints retired ───────────────────────────────────────────
+  const gone = (c: Context) =>
+    c.json(
+      {
+        error: "Gone",
+        message:
+          "El catálogo se administra ahora en la lógica de negocio remota (businessLogicUrl). " +
+          "Edita el catálogo desplegando la función de negocio de la organización.",
+      },
+      410,
+    );
 
-    const catalogId = c.req.param("catalogId");
-    const body = await c.req.json().catch(() => null);
-    const parsed = createItemValidator.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
-
-    const orgId = await resolveOrgId(user, catalogId);
-    const item = await manager.createItem(orgId, catalogId, {
-      ...parsed.data,
-      pricePerUnit: String(parsed.data.pricePerUnit),
-    });
-    return c.json(item, 201);
-  });
-
-  router.patch("/:catalogId/items/:itemId", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-
-    const catalogId = c.req.param("catalogId");
-    const itemId = c.req.param("itemId");
-    const body = await c.req.json().catch(() => null);
-    const parsed = updateItemValidator.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
-
-    const dto: Record<string, unknown> = {};
-    if (parsed.data.code !== undefined) dto["code"] = parsed.data.code;
-    if (parsed.data.name !== undefined) dto["name"] = parsed.data.name;
-    if (parsed.data.description !== undefined) dto["description"] = parsed.data.description;
-    if (parsed.data.category !== undefined) dto["category"] = parsed.data.category;
-    if (parsed.data.pricePerUnit !== undefined) dto["pricePerUnit"] = String(parsed.data.pricePerUnit);
-    if (parsed.data.unit !== undefined) dto["unit"] = parsed.data.unit;
-    if (parsed.data.sortOrder !== undefined) dto["sortOrder"] = parsed.data.sortOrder;
-    if (parsed.data.isActive !== undefined) dto["isActive"] = parsed.data.isActive;
-    if (Object.keys(dto).length === 0) return c.json({ error: "Validation", message: "No fields to update" }, 400);
-
-    const orgId = await resolveOrgId(user, catalogId);
-    const updated = await manager.updateItem(orgId, catalogId, itemId, dto as Parameters<typeof manager.updateItem>[3]);
-    return c.json(updated);
-  });
-
-  router.delete("/:catalogId/items/:itemId", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-    const catalogId = c.req.param("catalogId");
-    const itemId = c.req.param("itemId");
-    const orgId = await resolveOrgId(user, catalogId);
-    await manager.deleteItem(orgId, catalogId, itemId);
-    return c.json({ id: itemId });
-  });
-
-  // ── Pricing bulk import ─────────────────────────────────────────────────
-  router.post("/:catalogId/pricing/import", async (c) => {
-    const user = c.get("user");
-    if (!user?.orgId) return c.json({ error: "Unauthorized", message: "No orgId in token" }, 401);
-
-    const catalogId = c.req.param("catalogId");
-    const orgId = await resolveOrgId(user, catalogId);
-
-    // Verify catalog ownership
-    await manager.getCatalog(orgId, catalogId);
-
-    const body = await c.req.json().catch(() => null);
-    const parsed = pricingImportValidator.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Validation", message: parsed.error.message }, 400);
-
-    const result = await manager.importPricing(orgId, catalogId, parsed.data.grassTypes, parsed.data.pricing);
-    return c.json({ data: result });
-  });
+  router.post("/", gone);
+  router.patch("/:catalogId", gone);
+  router.delete("/:catalogId", gone);
+  router.post("/:catalogId/activate", gone);
+  router.post("/:catalogId/items", gone);
+  router.patch("/:catalogId/items/:itemId", gone);
+  router.delete("/:catalogId/items/:itemId", gone);
+  router.post("/:catalogId/pricing/import", gone);
 
   return router;
 }

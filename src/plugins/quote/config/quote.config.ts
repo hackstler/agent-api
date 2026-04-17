@@ -1,6 +1,9 @@
 /**
  * Default values used as fallback when an organization has no data configured.
  * In production, the org record in the database takes precedence.
+ *
+ * Domain-specific defaults (line-item prices, business thresholds, VAT) live
+ * in the remote business function, not here. The agent-api is agnostic to those.
  */
 export const quoteConfig = {
   companyName:    process.env["QUOTE_COMPANY_NAME"]    ?? "Tu Empresa S.L.",
@@ -9,15 +12,11 @@ export const quoteConfig = {
   companyNif:     process.env["QUOTE_COMPANY_NIF"]     ?? "B-00000000",
   companyEmail:   process.env["QUOTE_COMPANY_EMAIL"]   ?? "info@tuempresa.com",
 
-  vatRate: 0.21,
   currency: "€",
 
-  traviesasPricePerLm: 20.20,  // €/metro lineal traviesas madera tratada
-  aridosPricePerSaca: 42,      // €/saca de zahorra para preparación de base
   quoteValidityDays: 60,
   paymentTerms: "La forma de pago será 50% a la aprobación del presupuesto y 50% a la finalización de la obra.",
-  companyRegistration: "Empresa registrada en el Registro Mercantil de Madrid, tomo 40.633, folio 165, hoja M-721056, inscripción 1.ª, NIF B01931237.",
-  maxM2Lookup: 650,             // m² máximo en grass_pricing
+  companyRegistration: "",
 
   agentName: "QuoteAgent",
 } as const;

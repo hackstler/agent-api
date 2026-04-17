@@ -18,10 +18,6 @@ const QUOTE_SELECT = {
   pdfBase64: quotes.pdfBase64,
   filename: quotes.filename,
   quoteData: quotes.quoteData,
-  surfaceType: quotes.surfaceType,
-  areaM2: quotes.areaM2,
-  perimeterLm: quotes.perimeterLm,
-  province: quotes.province,
   inputHash: quotes.inputHash,
   createdAt: quotes.createdAt,
 } as const;

@@ -1,14 +1,12 @@
 import type { z } from "zod";
-import type { CompanyDetails, QuoteFooterSettings } from "../services/pdf.service.js";
-import type { CatalogService } from "../services/catalog.service.js";
-import type { PdfService } from "../services/pdf.service.js";
+import type { CompanyDetails, QuoteFooterSettings } from "../contracts.js";
 
 // ── Generic result types returned by every strategy ─────────────────────────
 
 /** A single row in the comparison table — strategy defines what fields go inside `breakdown`. */
 export interface QuoteComparisonRow {
   itemName: string;
-  /** Key-value pairs for each cost component (e.g. { pricePerM2: 12.5, aridos: 42 }) */
+  /** Key-value pairs for each cost component, defined by the strategy. */
   breakdown: Record<string, number>;
   subtotal: number;
   vat: number;
@@ -17,16 +15,14 @@ export interface QuoteComparisonRow {
 
 export interface QuoteCalculationResult {
   rows: QuoteComparisonRow[];
-  /** Free-form notes shown below the table (e.g. "Traviesa madera: 10 ml × 20,20 €/ml") */
+  /** Free-form notes shown below the table */
   notes: string[];
-  /** Section title above the table (e.g. "Suministro + Instalación (Todo incluido)") */
+  /** Section title above the table */
   sectionTitle: string;
   /** Strategy-specific data persisted as JSONB in the quotes table */
   quoteData: Record<string, unknown>;
-  /** Representative totals for the quote record (typically the cheapest option) */
+  /** Representative totals for the quote record */
   representativeTotals: { subtotal: number; vat: number; total: number };
-  /** Extra columns to persist on the quote row (e.g. surfaceType, areaM2) */
-  extraColumns: Record<string, string | null>;
 }
 
 // ── PDF column definition for data-driven rendering ─────────────────────────
@@ -43,10 +39,10 @@ export interface PdfColumnDef {
 // ── The strategy contract ───────────────────────────────────────────────────
 
 export interface QuoteStrategy {
-  /** Unique identifier for this business type (e.g. "grass", "cleaning") */
+  /** Unique identifier for this business type, supplied by the remote business function. */
   readonly businessType: string;
 
-  /** Human-readable name (e.g. "Césped Artificial") */
+  /** Human-readable display name, supplied by the remote business function. */
   readonly displayName: string;
 
   /** Zod schema for the tool's inputSchema — strategy-specific fields */
@@ -65,30 +61,24 @@ export interface QuoteStrategy {
   getListCatalogNote(): string;
 
   /**
-   * Core calculation: given validated params + catalog, produce comparison rows.
+   * Core calculation: given validated input + company, produce comparison rows.
    * The tool handles context extraction, company resolution, and persistence.
    */
   calculate(params: {
     input: Record<string, unknown>;
     company: CompanyDetails;
-    catalogId: string;
-    catalogService: CatalogService;
-    catalogSettings?: Record<string, unknown> | null | undefined;
   }): Promise<QuoteCalculationResult>;
 
-  /**
-   * Generate the PDF for this quote type.
-   * Each strategy owns its PDF layout — can delegate to PdfService methods or render custom.
-   */
+  /** Generate the PDF for this quote — returns base64 string. */
   generatePdf(params: {
     quoteNumber: string;
     date: string;
     company: CompanyDetails;
     clientName: string;
     clientAddress: string;
-    province: string;
     result: QuoteCalculationResult;
-    pdfService: PdfService;
     footer?: QuoteFooterSettings | undefined;
+    /** Strategy-specific extra fields (e.g. province) — passed through to the remote business function. */
+    extra?: Record<string, unknown> | undefined;
   }): Promise<string>;
 }

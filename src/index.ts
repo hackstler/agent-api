@@ -11,7 +11,6 @@ import { DrizzleWhatsAppSessionRepository } from "./infrastructure/repositories/
 import { DrizzleTopicRepository } from "./infrastructure/repositories/drizzle-topic.repository.js";
 import { DrizzleOAuthTokenRepository } from "./infrastructure/repositories/drizzle-oauth-token.repository.js";
 import { DrizzleOrganizationRepository } from "./infrastructure/repositories/drizzle-organization.repository.js";
-import { DrizzleCatalogRepository } from "./infrastructure/repositories/drizzle-catalog.repository.js";
 import { DrizzleInvitationRepository } from "./infrastructure/repositories/drizzle-invitation.repository.js";
 import { DrizzleQuoteRepository } from "./infrastructure/repositories/drizzle-quote.repository.js";
 
@@ -23,7 +22,6 @@ import { WhatsAppManager } from "./application/managers/whatsapp.manager.js";
 import { TopicManager } from "./application/managers/topic.manager.js";
 import { OrganizationManager } from "./application/managers/organization.manager.js";
 import { OAuthManager } from "./application/managers/oauth.manager.js";
-import { CatalogManager } from "./application/managers/catalog.manager.js";
 import { InvitationManager } from "./application/managers/invitation.manager.js";
 
 // Plugins
@@ -33,7 +31,6 @@ import { YouTubePlugin } from "./plugins/youtube/index.js";
 import { GmailPlugin } from "./plugins/gmail/index.js";
 import { CalendarPlugin } from "./plugins/calendar/index.js";
 import { QuotePlugin } from "./plugins/quote/index.js";
-import { CatalogManagerPlugin } from "./plugins/catalog-manager/index.js";
 import { ExpensesPlugin } from "./plugins/expenses/expenses.plugin.js";
 import { OAuthManagerAdapter } from "./plugins/google-common/oauth-manager-adapter.js";
 
@@ -76,7 +73,6 @@ const sessionRepo = new DrizzleWhatsAppSessionRepository();
 const topicRepo = new DrizzleTopicRepository();
 const oauthTokenRepo = new DrizzleOAuthTokenRepository();
 const orgRepo = new DrizzleOrganizationRepository();
-const catalogRepo = new DrizzleCatalogRepository();
 const invitationRepo = new DrizzleInvitationRepository();
 const quoteRepo = new DrizzleQuoteRepository();
 
@@ -89,8 +85,7 @@ const docManager = new DocumentManager(docRepo);
 const convManager = new ConversationManager(convRepo);
 const waManager = new WhatsAppManager(sessionRepo, userRepo);
 const topicManager = new TopicManager(topicRepo);
-const orgManager = new OrganizationManager(userRepo, docRepo, topicRepo, sessionRepo, orgRepo, catalogRepo, authStrategy);
-const catalogManager = new CatalogManager(catalogRepo);
+const orgManager = new OrganizationManager(userRepo, docRepo, topicRepo, sessionRepo, orgRepo, authStrategy);
 const invitationManager = new InvitationManager(invitationRepo, orgRepo, PASSWORD_SALT);
 const tokenEncryption = new AesTokenEncryption();
 const oauthManager = new OAuthManager(oauthTokenRepo, tokenEncryption);
@@ -111,7 +106,6 @@ const gmailPlugin = new GmailPlugin(oauthProvider, attachmentStore);
 pluginRegistry.register(gmailPlugin);
 pluginRegistry.register(new CalendarPlugin(oauthProvider));
 pluginRegistry.register(new QuotePlugin({ attachmentStore, organizationRepo: orgRepo, quoteRepo }));
-pluginRegistry.register(new CatalogManagerPlugin({ catalogManager, catalogRepo }));
 const driveService = new DriveApiService(oauthProvider);
 pluginRegistry.register(new ExpensesPlugin({ expenseManager, driveService, attachmentStore }));
 
@@ -143,7 +137,6 @@ const app = createApp({
   authConfig,
   authStrategy,
   oauthManager,
-  catalogManager,
   invitationManager,
   quoteRepo,
   organizationRepo: orgRepo,

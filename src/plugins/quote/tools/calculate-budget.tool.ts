@@ -1,12 +1,11 @@
 import { tool } from "ai";
+import { z } from "zod";
 import crypto from "crypto";
-import type { CatalogService } from "../services/catalog.service.js";
-import type { PdfService, CompanyDetails } from "../services/pdf.service.js";
+import type { CompanyDetails, QuoteFooterSettings } from "../contracts.js";
 import type { AttachmentStore } from "../../../domain/ports/attachment-store.js";
 import type { OrganizationRepository } from "../../../domain/ports/repositories/organization.repository.js";
 import type { QuoteRepository } from "../../../domain/ports/repositories/quote.repository.js";
 import type { QuoteStrategyRegistry } from "../strategies/index.js";
-import type { QuoteFooterSettings } from "../services/pdf.service.js";
 import { quoteConfig } from "../config/quote.config.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
 import { logger } from "../../../shared/logger.js";
@@ -18,17 +17,9 @@ import { logger } from "../../../shared/logger.js";
  *   - LLM re-invoking the tool for the same request across turns
  *   - User resending the same WhatsApp message
  *   - Webhook deduplication races
- *
- * Different inputs (any field changed) produce a different hash → fresh quote.
  */
 const IDEMPOTENCY_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
-/**
- * Build a deterministic hash of the calculateBudget input. Keys are sorted
- * alphabetically and string values are normalized (trim + lowercase) so that
- * "Carlos Ruiz" and "carlos ruiz " produce the same hash. Numbers and booleans
- * are stringified directly.
- */
 function buildInputHash(input: Record<string, unknown>): string {
   const sortedKeys = Object.keys(input).sort();
   const normalized: Record<string, unknown> = {};
@@ -47,8 +38,6 @@ function buildInputHash(input: Record<string, unknown>): string {
 }
 
 export interface CalculateBudgetDeps {
-  catalogService: CatalogService;
-  pdfService: PdfService;
   attachmentStore: AttachmentStore;
   organizationRepo: OrganizationRepository;
   quoteRepo: QuoteRepository;
@@ -79,20 +68,53 @@ function resolveCompanyDetails(
     nif:      org?.nif     ?? quoteConfig.companyNif,
     logo:     org?.logo    ?? null,
     web:      org?.web     ?? "",
-    vatRate:  org?.vatRate  ? Number(org.vatRate) : quoteConfig.vatRate,
+    vatRate:  org?.vatRate ? Number(org.vatRate) : 0.21,
     currency: org?.currency ?? quoteConfig.currency,
   };
 }
 
-export function createCalculateBudgetTool({ catalogService, pdfService, attachmentStore, organizationRepo, quoteRepo, strategyRegistry }: CalculateBudgetDeps) {
-  // Default strategy provides the initial schema/description at tool creation time.
-  // At runtime, the actual strategy is resolved per-org (local or remote).
-  const defaultStrategy = strategyRegistry.getDefault();
+/**
+ * Fallback schema used when no per-org schema is available (org without
+ * remote business function configured, or pre-warm scenarios). When the
+ * delegation layer calls `Plugin.resolveToolsForRequest(orgId)`, the
+ * QuotePlugin returns a tool built with the actual schema fetched from
+ * the org's business function `/config` endpoint, so the LLM sees the
+ * real required fields and extracts them.
+ */
+const fallbackSchema = z.object({
+  clientName:    z.string().describe("Nombre del cliente"),
+  clientAddress: z.string().optional().describe("Dirección del cliente"),
+}).passthrough();
+
+export interface CreateCalculateBudgetToolOptions {
+  /** Per-org input schema from the remote business function. Falls back to clientName/clientAddress passthrough. */
+  inputSchema?: z.ZodObject<z.ZodRawShape>;
+  /** Per-org tool description from the business function /config. */
+  description?: string;
+}
+
+export function createCalculateBudgetTool(
+  { attachmentStore, organizationRepo, quoteRepo, strategyRegistry }: CalculateBudgetDeps,
+  options: CreateCalculateBudgetToolOptions = {},
+) {
+  // Merge the per-org schema with the always-required client fields, keeping
+  // .passthrough() so the LLM can include any extra hint without Zod rejecting it.
+  const orgSchema = options.inputSchema;
+  const mergedSchema = orgSchema
+    ? orgSchema.extend({
+        clientName:    z.string().describe("Nombre completo del cliente"),
+        clientAddress: z.string().optional().describe("Dirección del cliente"),
+      }).passthrough()
+    : fallbackSchema;
 
   return tool({
-    description: defaultStrategy.getToolDescription(),
+    description: options.description
+      ?? "Calcula y genera un presupuesto en PDF para el cliente. " +
+        "Los campos específicos del negocio son resueltos por la lógica " +
+        "de negocio de la organización. " +
+        "Pasa todos los datos que el cliente te haya proporcionado.",
 
-    inputSchema: defaultStrategy.getInputSchema(),
+    inputSchema: mergedSchema,
 
     execute: async (input, { experimental_context }) => {
       logger.info(
@@ -113,14 +135,19 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
       const strategyInput = input as Record<string, unknown>;
       const clientName = (strategyInput["clientName"] as string) ?? "";
       const clientAddress = (strategyInput["clientAddress"] as string) ?? "";
-      const province = (strategyInput["province"] as string) ?? "";
 
-      logger.info({ orgId, userId, clientName, clientAddress, hasProvince: !!province }, "[calculateBudget] context resolved");
+      // Build "extra" payload of strategy-specific fields (anything beyond client data)
+      // forwarded to the remote business function for PDF rendering.
+      const extra: Record<string, unknown> = {};
+      for (const key of Object.keys(strategyInput)) {
+        if (key !== "clientName" && key !== "clientAddress") {
+          extra[key] = strategyInput[key];
+        }
+      }
+
+      logger.info({ orgId, userId, clientName, clientAddress, extraKeys: Object.keys(extra) }, "[calculateBudget] context resolved");
 
       // ── Idempotency check: short-circuit if an identical quote was just made.
-      // Deterministic short-circuit BEFORE invoking the business function — this
-      // is the safety net against the LLM (any sub-agent) re-invoking the tool
-      // for the same logical request across turns.
       const inputHash = buildInputHash(strategyInput);
       if (userId) {
         const recent = await quoteRepo.findRecentByUserAndHash(
@@ -140,8 +167,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
             },
             "[calculateBudget] IDEMPOTENT HIT — returning cached quote, skipping business function",
           );
-          // Re-publish the cached PDF to the AttachmentStore in case the cache
-          // entry expired. The DB row holds the canonical pdfBase64.
           if (recent.pdfBase64) {
             try {
               await attachmentStore.store({
@@ -160,8 +185,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
               logger.warn({ err, filename: recent.filename }, "[calculateBudget] re-store of cached PDF failed");
             }
           }
-          // Return the same shape as a fresh result. The LLM cannot tell the
-          // difference; the webhook will deliver the cached PDF as usual.
           const cachedRows = Array.isArray((recent.quoteData as { rows?: unknown[] } | null)?.rows)
             ? ((recent.quoteData as { rows: unknown[] }).rows)
             : [];
@@ -176,7 +199,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
               vat: Number(recent.vatAmount),
               total: Number(recent.total),
             },
-            extraColumns: undefined,
             pdfGenerated: true,
             filename: recent.filename,
             idempotent: true,
@@ -184,34 +206,30 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         }
       }
 
-      // Fetch org data and catalog in parallel
-      const [org, activeCatalog] = await Promise.all([
-        organizationRepo.findByOrgId(orgId),
-        catalogService.getActiveCatalog(orgId),
-      ]);
+      // Fetch org data
+      const org = await organizationRepo.findByOrgId(orgId);
 
       logger.info(
         {
           orgId,
           hasOrg: !!org,
           hasBusinessLogicUrl: !!org?.businessLogicUrl,
-          hasActiveCatalog: !!activeCatalog,
-          catalogId: activeCatalog?.id,
-          catalogBusinessType: activeCatalog?.businessType,
         },
-        "[calculateBudget] org+catalog loaded",
+        "[calculateBudget] org loaded",
       );
 
-      if (!activeCatalog) {
-        logger.error({ orgId, hasBusinessLogicUrl: !!org?.businessLogicUrl }, "[calculateBudget] EARLY EXIT — no active catalog");
+      // Resolve strategy: must be remote
+      let activeStrategy;
+      try {
+        activeStrategy = await strategyRegistry.resolveForOrg(org);
+      } catch (err) {
+        logger.error({ err, orgId }, "[calculateBudget] strategy resolution failed");
         return {
           success: false, clientName, rows: [], pdfGenerated: false, filename: "",
-          error: "No active catalog found for this organization",
+          error: err instanceof Error ? err.message : String(err),
         };
       }
 
-      // Resolve strategy: remote (if org has businessLogicUrl) or local (by catalog businessType)
-      const activeStrategy = await strategyRegistry.resolveForOrg(org, activeCatalog.businessType);
       const company = resolveCompanyDetails(org);
       const footer = resolveQuoteFooter(org);
 
@@ -220,21 +238,16 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
           orgId,
           userId,
           strategy: activeStrategy.businessType,
-          isRemote: !!(org?.businessLogicUrl && org.businessLogicApiKey),
-          catalogBusinessType: activeCatalog.businessType,
         },
         "[calculateBudget] strategy resolved",
       );
 
-      // Delegate calculation to the strategy — it knows its own input fields
+      // Delegate calculation to the strategy
       let result;
       try {
         result = await activeStrategy.calculate({
           input: strategyInput,
           company,
-          catalogId: activeCatalog.id,
-          catalogService,
-          catalogSettings: activeCatalog.settings,
         });
         logger.info(
           {
@@ -268,10 +281,9 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
           company,
           clientName,
           clientAddress,
-          province,
           result,
-          pdfService,
           footer,
+          extra,
         });
         logger.info(
           {
@@ -301,7 +313,7 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
             quoteNumber,
             clientName,
             clientAddress,
-            lineItems: [], // comparison quotes don't use line items
+            lineItems: [],
             subtotal: String(result.representativeTotals.subtotal),
             vatAmount: String(result.representativeTotals.vat),
             total: String(result.representativeTotals.total),
@@ -309,7 +321,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
             filename,
             quoteData: result.quoteData as Record<string, unknown>,
             inputHash,
-            ...result.extraColumns,
           });
           quoteId = quote.id;
           logger.info({ quoteId, quoteNumber, filename }, "[calculateBudget] quote persisted to DB");
@@ -351,9 +362,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         );
       }
 
-      // Build response — flatten breakdown onto row so the LLM has direct access to
-      // strategy-specific fields (pricePerM2, etc.) without nested lookup. This keeps
-      // the summary the agent produces detailed enough (e.g. "TESSA25: 3.807,93 €").
       const rows = result.rows.map((r) => ({
         itemName: r.itemName,
         ...r.breakdown,
@@ -382,7 +390,6 @@ export function createCalculateBudgetTool({ catalogService, pdfService, attachme
         notes: result.notes,
         rows,
         representativeTotals: result.representativeTotals,
-        extraColumns: result.extraColumns,
         pdfGenerated: !!pdfBase64,
         filename,
       };

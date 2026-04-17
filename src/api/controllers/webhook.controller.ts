@@ -414,10 +414,16 @@ export function createWebhookController(
     // it is hallucinating — replace the reply with a honest retry message
     // instead of lying to the user.
     //
-    // Patterns matched are present-tense affirmations of NEW generation only.
-    // Past references like "ya generamos uno antes" are intentionally NOT matched.
+    // IMPORTANT: Skip the guard when the delegation went to a non-quote agent
+    // (e.g. gmail). The reply may legitimately reference a PDF filename
+    // (e.g. "He enviado PRES-xxx.pdf por email") without having generated it
+    // in this turn. Triggering the guard on those replies is a false positive
+    // that breaks email sending.
     const HALLUCINATED_GENERATION = /(?:^|[\s,.])(?:he|hemos|se ha|se han|ya he|de acuerdo[, ]+he)\s+generad[oa]\b|nuevo\s+presupuesto\s+(?:para|de|generado)|presupuesto\s+(?:listo|completo|generado correctamente)|aqu[ií]\s+tienes\s+(?:el|tu)\s+presupuesto|PRES-\d{8}-\d{4}\.pdf/i;
-    if (!pdfFilename && HALLUCINATED_GENERATION.test(replyText)) {
+    const usedNonQuoteAgent = result.steps.some((s) =>
+      s.toolResults.some((r) => r.toolName.startsWith("delegateTo_") && r.toolName !== "delegateTo_quote"),
+    );
+    if (!pdfFilename && !usedNonQuoteAgent && HALLUCINATED_GENERATION.test(replyText)) {
       logger.warn(
         {
           userId,

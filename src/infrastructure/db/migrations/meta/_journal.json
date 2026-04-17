@@ -169,6 +169,13 @@
       "when": 1776339267229,
       "tag": "0023_add_quotes_input_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1776341881152,
+      "tag": "0024_drop_catalog_grass_remote_decoupling",
+      "breakpoints": true
     }
   ]
 }

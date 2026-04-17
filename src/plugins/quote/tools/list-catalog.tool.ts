@@ -1,22 +1,21 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { CatalogService } from "../services/catalog.service.js";
 import type { OrganizationRepository } from "../../../domain/ports/repositories/organization.repository.js";
 import type { QuoteStrategyRegistry } from "../strategies/index.js";
 import { RemoteQuoteStrategy } from "../strategies/remote.strategy.js";
 import { getAgentContextValue } from "../../../application/agent-context.js";
 
 export interface ListCatalogDeps {
-  catalogService: CatalogService;
   organizationRepo: OrganizationRepository;
   strategyRegistry: QuoteStrategyRegistry;
 }
 
-export function createListCatalogTool({ catalogService, organizationRepo, strategyRegistry }: ListCatalogDeps) {
-  const defaultStrategy = strategyRegistry.getDefault();
-
+export function createListCatalogTool({ organizationRepo, strategyRegistry }: ListCatalogDeps) {
   return tool({
-    description: defaultStrategy.getListCatalogDescription(),
+    description:
+      "Lista los productos disponibles en el catálogo de la organización. " +
+      "Úsalo cuando el usuario pregunte qué productos hay, qué precios manejas, " +
+      "o necesites mostrar opciones antes de calcular un presupuesto.",
 
     inputSchema: z.object({}),
 
@@ -32,47 +31,37 @@ export function createListCatalogTool({ catalogService, organizationRepo, strate
         };
       }
 
-      const [org, activeCatalog] = await Promise.all([
-        organizationRepo.findByOrgId(orgId),
-        catalogService.getActiveCatalog(orgId),
-      ]);
+      const org = await organizationRepo.findByOrgId(orgId);
 
-      if (!activeCatalog) {
+      let activeStrategy;
+      try {
+        activeStrategy = await strategyRegistry.resolveForOrg(org);
+      } catch (err) {
         return {
           success: false,
           catalogName: "",
           items: [],
           note: "",
-          error: "No active catalog found for this organization",
+          error: err instanceof Error ? err.message : String(err),
         };
       }
 
-      // Resolve strategy: remote (if org has businessLogicUrl) or local
-      const activeStrategy = await strategyRegistry.resolveForOrg(org, activeCatalog.businessType);
-
-      // Remote strategies fetch catalog from their own endpoint
-      if (activeStrategy instanceof RemoteQuoteStrategy) {
-        const remoteItems = await activeStrategy.fetchCatalog();
+      // Strategy is always remote in this build — fetchCatalog lives only there
+      if (!(activeStrategy instanceof RemoteQuoteStrategy)) {
         return {
-          success: true,
-          catalogName: activeStrategy.displayName,
-          items: remoteItems,
-          note: activeStrategy.getListCatalogNote(),
+          success: false,
+          catalogName: "",
+          items: [],
+          note: "",
+          error: "Active strategy does not support catalog listing",
         };
       }
 
-      // Local strategies use the local catalog service
-      const items = await catalogService.getAllItems(activeCatalog.id);
-
+      const remoteItems = await activeStrategy.fetchCatalog();
       return {
         success: true,
         catalogName: activeStrategy.displayName,
-        items: items.map((i) => ({
-          code: i.code,
-          name: i.name,
-          description: i.description,
-          unit: i.unit,
-        })),
+        items: remoteItems,
         note: activeStrategy.getListCatalogNote(),
       };
     },

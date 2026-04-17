@@ -170,8 +170,32 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager, 
           logger.info({ pluginId: plugin.id, mediaCount: attachments.length }, "Forwarding media to sub-agent");
         }
 
-        // Wrap plugin tools with permission checks
-        const wrappedTools = wrapToolsWithPermissions(plugin.tools, query);
+        // Per-org tools: some plugins (e.g. quote) need to rebuild their tool
+        // schemas from the org's remote business function so the LLM knows
+        // which business-specific fields to extract from the user message.
+        // Fall back to the plugin's static tools if no per-org override.
+        let orgTools: AgentTools | null = null;
+        if (orgId && typeof plugin.resolveToolsForRequest === "function") {
+          try {
+            orgTools = await plugin.resolveToolsForRequest(orgId);
+          } catch (err) {
+            logger.warn({ err, pluginId: plugin.id, orgId }, "resolveToolsForRequest failed — using default tools");
+          }
+        }
+
+        // Wrap (per-org or default) plugin tools with permission checks
+        const wrappedTools = wrapToolsWithPermissions(orgTools ?? plugin.tools, query);
+
+        // Per-org system prompt (e.g. quote plugin pulls agentInstructions
+        // from the remote business function configured on the org).
+        let systemOverride: string | null = null;
+        if (orgId && typeof plugin.resolveSystemForRequest === "function") {
+          try {
+            systemOverride = await plugin.resolveSystemForRequest(orgId, ragConfig.responseLanguage);
+          } catch (err) {
+            logger.warn({ err, pluginId: plugin.id, orgId }, "resolveSystemForRequest failed — using default prompt");
+          }
+        }
 
         logger.info(
           {
@@ -179,6 +203,7 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager, 
             historyMsgs: history.length,
             wrappedToolNames: Object.keys(wrappedTools),
             isConfirmedQuery: query.startsWith("CONFIRMED:"),
+            hasSystemOverride: !!systemOverride,
           },
           "[Delegation] About to call plugin.agent.generate()",
         );
@@ -189,6 +214,7 @@ function createDelegationTool(plugin: Plugin, convManager: ConversationManager, 
           ...(ctx ? { experimental_context: ctx } : {}),
           tools: wrappedTools,
           ...(attachments?.length ? { attachments } : {}),
+          ...(systemOverride ? { system: systemOverride } : {}),
         });
 
         if (!result.text?.trim()) {

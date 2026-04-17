@@ -184,7 +184,7 @@ function splitIntoSessions(messages: HistoryMessage[]): Session[] {
  *
  * Instead, extract only the TOPICS discussed from user messages.
  *
- * Format: "25 mar: traviesas, presupuesto Carlos Ruiz, enlace YouTube"
+ * Format: "25 mar: presupuesto Carlos Ruiz, consulta producto X, enlace YouTube"
  */
 function compactSession(session: Session): string | null {
   const userTopics: string[] = [];

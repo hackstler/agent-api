@@ -19,6 +19,8 @@ export interface GenerateOptions {
   tools?: ToolSet;
   /** Multimodal attachments (images, PDFs) sent alongside the text prompt. */
   attachments?: MediaAttachment[];
+  /** Override the agent's default system prompt for this call only (e.g., per-org instructions). */
+  system?: string;
 }
 
 export interface StreamOptions {
@@ -46,7 +48,7 @@ export class AgentRunner {
   }
 
   async generate(opts: GenerateOptions): Promise<AgentGenerateResult> {
-    const { prompt, messages, experimental_context, maxSteps, tools: toolOverrides, attachments } = opts;
+    const { prompt, messages, experimental_context, maxSteps, tools: toolOverrides, attachments, system: systemOverride } = opts;
 
     // Build user message — multimodal if attachments are present
     const userContent = attachments?.length
@@ -66,7 +68,8 @@ export class AgentRunner {
       { role: "user" as const, content: userContent as any },
     ];
 
-    const system = typeof this.config.system === "function" ? this.config.system() : this.config.system;
+    const system = systemOverride
+      ?? (typeof this.config.system === "function" ? this.config.system() : this.config.system);
 
     const toolsInUse = toolOverrides ?? this.config.tools;
     const toolNames = Object.keys(toolsInUse ?? {});

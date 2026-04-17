@@ -331,27 +331,6 @@ export interface QuoteLineItem {
   lineTotal: number;
 }
 
-export interface GrassComparisonRow {
-  grassName: string;
-  pricePerM2: number;
-  totalGrassInstalled: number;
-  aridosTotal: number;
-  traviesasTotal: number;
-  baseImponible: number;
-  iva: number;
-  totalConIva: number;
-}
-
-export interface GrassQuoteData {
-  areaM2: number;
-  surfaceType: "SOLADO" | "TIERRA";
-  perimeterLm: number;
-  sacasAridos: number;
-  rows: GrassComparisonRow[];
-  traviesasNote: string;
-  aridosNote?: string;
-}
-
 export interface Quote {
   id: string;
   orgId: string;
@@ -366,10 +345,6 @@ export interface Quote {
   pdfBase64: string | null;
   filename: string;
   quoteData: Record<string, unknown> | null;
-  surfaceType: string | null;
-  areaM2: string | null;
-  perimeterLm: string | null;
-  province: string | null;
   inputHash: string | null;
   createdAt: Date;
 }
@@ -388,10 +363,6 @@ export interface NewQuote {
   pdfBase64?: string | null | undefined;
   filename: string;
   quoteData?: Record<string, unknown> | null | undefined;
-  surfaceType?: string | null | undefined;
-  areaM2?: string | null | undefined;
-  perimeterLm?: string | null | undefined;
-  province?: string | null | undefined;
   inputHash?: string | null | undefined;
   createdAt?: Date | undefined;
 }
@@ -420,58 +391,6 @@ export interface NewAgentMemory {
   key: string;
   content: string;
   metadata?: Record<string, unknown> | null | undefined;
-}
-
-// ── Catalog ─────────────────────────────────────────────────────────────────
-
-export interface Catalog {
-  id: string;
-  orgId: string;
-  name: string;
-  effectiveDate: Date;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface NewCatalog {
-  id?: string | undefined;
-  orgId: string;
-  name: string;
-  effectiveDate: Date;
-  isActive?: boolean | undefined;
-  createdAt?: Date | undefined;
-  updatedAt?: Date | undefined;
-}
-
-// ── CatalogItem ─────────────────────────────────────────────────────────────
-
-export interface CatalogItem {
-  id: string;
-  catalogId: string;
-  code: number;
-  name: string;
-  description: string | null;
-  category: string | null;
-  pricePerUnit: string;
-  unit: string;
-  sortOrder: number;
-  isActive: boolean;
-  createdAt: Date;
-}
-
-export interface NewCatalogItem {
-  id?: string | undefined;
-  catalogId: string;
-  code: number;
-  name: string;
-  description?: string | null | undefined;
-  category?: string | null | undefined;
-  pricePerUnit: string;
-  unit: string;
-  sortOrder?: number | undefined;
-  isActive?: boolean | undefined;
-  createdAt?: Date | undefined;
 }
 
 // ── Expense ──────────────────────────────────────────────────────────────────

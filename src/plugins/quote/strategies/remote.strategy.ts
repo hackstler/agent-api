@@ -3,9 +3,7 @@ import type {
   QuoteStrategy,
   QuoteCalculationResult,
 } from "./quote-strategy.interface.js";
-import type { CompanyDetails, QuoteFooterSettings } from "../services/pdf.service.js";
-import type { CatalogService } from "../services/catalog.service.js";
-import type { PdfService } from "../services/pdf.service.js";
+import type { CompanyDetails, QuoteFooterSettings } from "../contracts.js";
 import { logger } from "../../../shared/logger.js";
 
 // ── Types for the remote business function contract ─────────────────────────
@@ -47,7 +45,7 @@ export interface RemoteCatalogItem {
 // ── JSON Schema → Zod conversion (lightweight, no external deps) ────────────
 
 function jsonSchemaPropertyToZod(
-  name: string,
+  _name: string,
   prop: BusinessFunctionConfig["inputSchema"]["properties"][string],
   required: boolean,
 ): z.ZodTypeAny {
@@ -185,9 +183,6 @@ export class RemoteQuoteStrategy implements QuoteStrategy {
   async calculate(params: {
     input: Record<string, unknown>;
     company: CompanyDetails;
-    catalogId: string;
-    catalogService: CatalogService;
-    catalogSettings?: Record<string, unknown> | null | undefined;
   }): Promise<QuoteCalculationResult> {
     const url = `${this.endpoint}/calculate`;
 
@@ -220,10 +215,9 @@ export class RemoteQuoteStrategy implements QuoteStrategy {
     company: CompanyDetails;
     clientName: string;
     clientAddress: string;
-    province: string;
     result: QuoteCalculationResult;
-    pdfService: PdfService;
     footer?: QuoteFooterSettings | undefined;
+    extra?: Record<string, unknown> | undefined;
   }): Promise<string> {
     const url = `${this.endpoint}/pdf`;
 
@@ -237,9 +231,9 @@ export class RemoteQuoteStrategy implements QuoteStrategy {
         company: params.company,
         clientName: params.clientName,
         clientAddress: params.clientAddress,
-        province: params.province,
         result: params.result,
         footer: params.footer,
+        ...(params.extra ?? {}),
       }),
     });
 

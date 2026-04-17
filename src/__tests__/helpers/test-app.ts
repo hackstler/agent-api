@@ -27,7 +27,6 @@ import {
   createMockSessionRepo,
   createMockTopicRepo,
   createMockOrgRepo,
-  createMockCatalogRepo,
 } from "./mock-repos.js";
 import type { AuthConfig } from "../../config/auth.config.js";
 import { InMemoryAttachmentStore } from "../../infrastructure/stores/in-memory-attachment-store.js";
@@ -88,7 +87,6 @@ export function createTestApp(): TestContext {
     session: createMockSessionRepo(),
     topic: createMockTopicRepo(),
     org: createMockOrgRepo(),
-    catalog: createMockCatalogRepo(),
   };
 
   const authStrategy = new PasswordStrategy(PASSWORD_SALT, repos.user);
@@ -99,7 +97,7 @@ export function createTestApp(): TestContext {
     conv: new ConversationManager(repos.conv),
     wa: new WhatsAppManager(repos.session, repos.user),
     topic: new TopicManager(repos.topic),
-    org: new OrganizationManager(repos.user, repos.doc, repos.topic, repos.session, repos.org, repos.catalog, authStrategy),
+    org: new OrganizationManager(repos.user, repos.doc, repos.topic, repos.session, repos.org, authStrategy),
   };
 
   const mockAgent = {
